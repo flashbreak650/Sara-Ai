@@ -95,7 +95,7 @@ enum class FemaleVoicePersona(
     ),
     SARA_SWEET(
         voiceId = "SaraSweet",
-        geminiVoiceId = "Kore",
+        geminiVoiceId = "Despina",
         fallbackVoiceId = "Kore",
         labelBn = "সারা সুইট — মধুর আড্ডা",
         labelEn = "Sara Sweet — Warm Companion",
@@ -105,7 +105,7 @@ enum class FemaleVoicePersona(
     ),
     SARA_VELVET(
         voiceId = "SaraVelvet",
-        geminiVoiceId = "Zephyr",
+        geminiVoiceId = "Sulafat",
         fallbackVoiceId = "Zephyr",
         labelBn = "সারা ভেলভেট — রেশমি প্রশান্ত",
         labelEn = "Sara Velvet — Soothing Serene",
@@ -220,7 +220,7 @@ data class SaraSettings(
     val voiceProvider: VoiceProviderMode = VoiceProviderMode.CLOUD_NEURAL_FEMALE,
     val voiceGender: VoiceGenderPreference = VoiceGenderPreference.FEMALE,
     val femaleVoicePersona: FemaleVoicePersona = FemaleVoicePersona.KORE,
-    val speechSpeed: Float = 0.96f,
+    val speechSpeed: Float = 1.0f,
     val speechPitch: Float = 1.0f,
     val voiceLanguage: VoiceLanguageOption = VoiceLanguageOption.BENGALI,
     val voiceVolume: Float = 0.92f,
