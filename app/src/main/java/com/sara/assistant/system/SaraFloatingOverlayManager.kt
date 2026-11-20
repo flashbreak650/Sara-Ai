@@ -84,9 +84,12 @@ class SaraFloatingOverlayManager(
         bubbleParams = params
 
         val orb = FloatingOrbPulseView(context).apply {
-            setOnTouchListener(DraggableTouchListener(params) {
-                expandToCard()
-            })
+            setOnTouchListener(
+                DraggableTouchListener(
+                    params = params,
+                    onTap = { expandToCard() }
+                )
+            )
         }
         bubbleOrbView = orb
         bubbleView = orb
