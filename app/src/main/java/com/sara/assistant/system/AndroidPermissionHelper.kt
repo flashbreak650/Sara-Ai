@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 
 data class AndroidPermissionSnapshot(
     val microphoneGranted: Boolean,
+    val overlayPermissionGranted: Boolean,
     val callPhoneGranted: Boolean,
     val sendSmsGranted: Boolean,
     val notificationsGranted: Boolean,
@@ -35,6 +36,7 @@ object AndroidPermissionHelper {
 
     fun captureSnapshot(context: Context): AndroidPermissionSnapshot {
         val mic = isGranted(context, Manifest.permission.RECORD_AUDIO)
+        val overlay = Settings.canDrawOverlays(context)
         val call = isGranted(context, Manifest.permission.CALL_PHONE)
         val sms = isGranted(context, Manifest.permission.SEND_SMS)
         val notif = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -65,6 +67,7 @@ object AndroidPermissionHelper {
 
         return AndroidPermissionSnapshot(
             microphoneGranted = mic,
+            overlayPermissionGranted = overlay,
             callPhoneGranted = call,
             sendSmsGranted = sms,
             notificationsGranted = notif,
@@ -80,6 +83,17 @@ object AndroidPermissionHelper {
 
     private fun isGranted(context: Context, permission: String): Boolean {
         return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    }
+
+    fun openOverlayPermissionSettings(context: Context) {
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:${context.packageName}")
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val started = runCatching { context.startActivity(intent) }.isSuccess
+        if (!started) {
+            openAppSettings(context)
+        }
     }
 
     fun openAppSettings(context: Context) {

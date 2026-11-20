@@ -173,7 +173,7 @@ fun SaraAvatarFrame(
             modifier = Modifier
                 .size(size * 0.84f)
                 .clip(CircleShape)
-                .border(1.2.dp, colors.accentPrimary.copy(alpha = 0.5f), CircleShape)
+                .border(1.5.dp, colors.accentPrimary.copy(alpha = 0.55f), CircleShape)
         )
 
         if (showOnlineBadge) {
@@ -320,7 +320,7 @@ fun SaraPrimaryGradientButton(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = if (enabled) Color(0xFF060B18) else colors.textMuted,
+                tint = if (enabled) Color.White else colors.textMuted,
                 modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(8.dp))
@@ -328,7 +328,7 @@ fun SaraPrimaryGradientButton(
         Text(
             text = text,
             style = MaterialTheme.typography.labelMedium.copy(
-                color = if (enabled) Color(0xFF060B18) else colors.textMuted,
+                color = if (enabled) Color.White else colors.textMuted,
                 fontWeight = FontWeight.Bold
             )
         )
@@ -463,7 +463,7 @@ fun SaraIconGlowButton(
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = if (highlighted) Color(0xFF060B18) else colors.accentPrimary,
+            tint = if (highlighted) Color.White else colors.accentPrimary,
             modifier = Modifier.size(size * 0.45f)
         )
     }

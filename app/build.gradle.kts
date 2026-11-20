@@ -12,8 +12,8 @@ android {
         applicationId = "com.sara.assistant"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.3.1-voice"
+        versionCode = 5
+        versionName = "0.4.0-assistant"
 
         vectorDrawables {
             useSupportLibrary = true
@@ -55,5 +55,6 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
+    implementation(libs.androidx.datastore.preferences)
     debugImplementation(libs.androidx.ui.tooling)
 }

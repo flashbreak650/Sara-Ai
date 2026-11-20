@@ -231,7 +231,7 @@ fun SettingsSwitchRow(
             enabled = enabled,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color(0xFF060B18),
+                checkedThumbColor = Color.White,
                 checkedTrackColor = colors.accentPrimary,
                 uncheckedThumbColor = colors.textSecondary,
                 uncheckedTrackColor = colors.elevated,

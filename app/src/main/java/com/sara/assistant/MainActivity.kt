@@ -1,7 +1,9 @@
 package com.sara.assistant
 
+import android.Manifest
 import android.app.KeyguardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -30,20 +32,25 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.sara.assistant.data.settings.InboxCategory
 import com.sara.assistant.data.settings.SaraSettingsRepository
+import com.sara.assistant.system.AndroidPermissionHelper
+import com.sara.assistant.system.SaraAssistantBrain
+import com.sara.assistant.system.SaraBootReceiver
 import com.sara.assistant.system.SaraVoiceEngine
 import com.sara.assistant.system.SaraWakeService
 import com.sara.assistant.ui.components.SaraAvatarFrame
 import com.sara.assistant.ui.components.SaraPrimaryGradientButton
 import com.sara.assistant.ui.screens.HomeScreen
-import com.sara.assistant.ui.screens.ProfileScreen
+import com.sara.assistant.ui.screens.InboxScreen
+import com.sara.assistant.ui.screens.SettingsFeaturePage
 import com.sara.assistant.ui.screens.SettingsScreen
 import com.sara.assistant.ui.theme.LocalSaraColors
 import com.sara.assistant.ui.theme.SaraTheme
 
 private enum class SaraDestination {
     HOME,
-    PROFILE,
+    INBOX,
     SETTINGS
 }
 
@@ -56,19 +63,66 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        repository = SaraSettingsRepository(applicationContext)
+        repository = SaraSettingsRepository.getInstance(applicationContext)
         voiceEngine = SaraVoiceEngine(applicationContext, repository.secureKeyStorage)
 
         setContent {
             val settings by repository.settings.collectAsState()
             val memories by repository.memories.collectAsState()
             val conversationHistory by repository.conversationHistory.collectAsState()
+            val inboxItems by repository.inboxItems.collectAsState()
             val voiceStatus by voiceEngine.status.collectAsState()
             val isSpeaking by voiceEngine.isSpeaking.collectAsState()
-            val wakeServiceRunning by SaraWakeService.isRunning.collectAsState()
+            val backgroundState by SaraWakeService.assistantState.collectAsState()
 
             var destination by remember { mutableStateOf(SaraDestination.HOME) }
+            var settingsInitialPage by remember { mutableStateOf(SettingsFeaturePage.HUB) }
             var unlocked by remember { mutableStateOf(!settings.appLockEnabled) }
+
+            val unreadInboxCount = remember(inboxItems) { inboxItems.count { !it.isRead } }
+
+            val micLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission()
+            ) { granted ->
+                val snap = AndroidPermissionHelper.captureSnapshot(applicationContext)
+                repository.updatePermissionStateSnapshot(
+                    micGranted = snap.microphoneGranted,
+                    overlayGranted = snap.overlayPermissionGranted,
+                    batteryUnrestricted = snap.batteryOptimizationIgnored,
+                    serviceActive = SaraWakeService.isRunning.value
+                )
+                if (granted) {
+                    val started = SaraWakeService.start(
+                        applicationContext,
+                        settings.customWakeWord,
+                        startPaused = false
+                    )
+                    if (started) {
+                        repository.updateSettings {
+                            it.copy(wakeWordEnabled = true, wakeListeningPaused = false)
+                        }
+                    }
+                }
+            }
+
+            // Capture permission snapshot & restore persistent background assistant state on app start
+            LaunchedEffect(Unit) {
+                val snap = AndroidPermissionHelper.captureSnapshot(applicationContext)
+                val fromBootNotif = intent?.getBooleanExtra(SaraBootReceiver.EXTRA_RESUME_WAKE_FROM_BOOT, false) == true
+                if ((settings.wakeWordEnabled || fromBootNotif) && snap.microphoneGranted) {
+                    SaraWakeService.start(
+                        context = applicationContext,
+                        wakeWord = settings.customWakeWord,
+                        startPaused = if (fromBootNotif) false else settings.wakeListeningPaused
+                    )
+                }
+                repository.updatePermissionStateSnapshot(
+                    micGranted = snap.microphoneGranted,
+                    overlayGranted = snap.overlayPermissionGranted,
+                    batteryUnrestricted = snap.batteryOptimizationIgnored,
+                    serviceActive = SaraWakeService.isRunning.value
+                )
+            }
 
             val keyguardManager = remember {
                 getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
@@ -84,12 +138,12 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(settings.appLockEnabled) {
                 if (settings.appLockEnabled && !unlocked && keyguardManager?.isDeviceSecure == true) {
                     @Suppress("DEPRECATION")
-                    val intent = keyguardManager.createConfirmDeviceCredentialIntent(
+                    val authIntent = keyguardManager.createConfirmDeviceCredentialIntent(
                         "${settings.assistantName} Security Lock",
                         "Unlock ${settings.assistantName} with your device PIN or biometric"
                     )
-                    if (intent != null) {
-                        unlockLauncher.launch(intent)
+                    if (authIntent != null) {
+                        unlockLauncher.launch(authIntent)
                     } else {
                         unlocked = true
                     }
@@ -99,7 +153,6 @@ class MainActivity : ComponentActivity() {
             }
 
             SaraTheme(
-                themeMode = settings.themeMode,
                 accentColor = settings.accentColor,
                 textSize = settings.textSize
             ) {
@@ -108,12 +161,12 @@ class MainActivity : ComponentActivity() {
                         assistantName = settings.assistantName,
                         onUnlockRequest = {
                             @Suppress("DEPRECATION")
-                            val intent = keyguardManager?.createConfirmDeviceCredentialIntent(
+                            val authIntent = keyguardManager?.createConfirmDeviceCredentialIntent(
                                 "${settings.assistantName} Security Lock",
                                 "Unlock ${settings.assistantName}"
                             )
-                            if (intent != null) {
-                                unlockLauncher.launch(intent)
+                            if (authIntent != null) {
+                                unlockLauncher.launch(authIntent)
                             } else {
                                 unlocked = true
                             }
@@ -122,7 +175,7 @@ class MainActivity : ComponentActivity() {
                 } else {
                     Crossfade(
                         targetState = destination,
-                        animationSpec = tween(durationMillis = if (settings.animationsEnabled) 260 else 0),
+                        animationSpec = tween(durationMillis = if (settings.animationsEnabled) 240 else 0),
                         label = "sara_nav_crossfade"
                     ) { screen ->
                         when (screen) {
@@ -131,10 +184,48 @@ class MainActivity : ComponentActivity() {
                                     settings = settings,
                                     memories = memories,
                                     conversationHistory = conversationHistory,
+                                    inboxUnreadCount = unreadInboxCount,
                                     isSpeaking = isSpeaking,
-                                    wakeServiceRunning = wakeServiceRunning,
-                                    onOpenProfile = { destination = SaraDestination.PROFILE },
-                                    onOpenSettings = { destination = SaraDestination.SETTINGS },
+                                    backgroundState = backgroundState,
+                                    onOpenInbox = { destination = SaraDestination.INBOX },
+                                    onOpenSettings = {
+                                        settingsInitialPage = SettingsFeaturePage.HUB
+                                        destination = SaraDestination.SETTINGS
+                                    },
+                                    onOpenBackgroundSettings = {
+                                        settingsInitialPage = SettingsFeaturePage.BACKGROUND_ASSISTANT
+                                        destination = SaraDestination.SETTINGS
+                                    },
+                                    onStartWakeService = {
+                                        val snap = AndroidPermissionHelper.captureSnapshot(applicationContext)
+                                        if (!snap.microphoneGranted) {
+                                            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        } else {
+                                            val started = SaraWakeService.start(
+                                                applicationContext,
+                                                settings.customWakeWord,
+                                                startPaused = false
+                                            )
+                                            if (started) {
+                                                repository.updateSettings {
+                                                    it.copy(wakeWordEnabled = true, wakeListeningPaused = false)
+                                                }
+                                            }
+                                        }
+                                    },
+                                    onTogglePauseService = {
+                                        if (backgroundState.isPaused) {
+                                            SaraWakeService.resume(applicationContext)
+                                        } else {
+                                            SaraWakeService.pause(applicationContext)
+                                        }
+                                    },
+                                    onStopWakeService = {
+                                        SaraWakeService.stop(applicationContext)
+                                    },
+                                    onTalkOutside = {
+                                        SaraWakeService.talkNow(applicationContext, settings.customWakeWord)
+                                    },
                                     onOrbSpeak = { message ->
                                         voiceEngine.speakIfEnabled(message, settings)
                                     },
@@ -142,7 +233,24 @@ class MainActivity : ComponentActivity() {
                                         voiceEngine.stopPlayback()
                                     },
                                     onSubmitMessage = { message ->
-                                        repository.recordConversationMessage(message)
+                                        repository.recordConversationMessage(message, isAssistant = false)
+                                        val reply = SaraAssistantBrain.generateReply(
+                                            context = applicationContext,
+                                            userText = message,
+                                            settings = settings,
+                                            memories = memories,
+                                            history = conversationHistory,
+                                            secureKeyStorage = repository.secureKeyStorage
+                                        )
+                                        repository.recordConversationMessage(reply.text, isAssistant = true)
+                                        repository.addInboxMessage(
+                                            title = message.take(44),
+                                            body = reply.text,
+                                            category = InboxCategory.VOICE_REPLY,
+                                            senderVoicePersona = settings.femaleVoicePersona.voiceId
+                                        )
+                                        voiceEngine.speakIfEnabled(reply.text, settings)
+                                        reply.text
                                     },
                                     onAddMemory = { note ->
                                         repository.addMemory(note)
@@ -150,21 +258,17 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-                            SaraDestination.PROFILE -> {
+                            SaraDestination.INBOX -> {
                                 BackHandler {
                                     destination = SaraDestination.HOME
                                 }
-                                ProfileScreen(
+                                InboxScreen(
                                     settings = settings,
-                                    memoryCount = memories.size,
-                                    conversationCount = conversationHistory.size,
-                                    voiceStatus = voiceStatus,
-                                    wakeServiceRunning = wakeServiceRunning,
+                                    inboxItems = inboxItems,
                                     isSpeaking = isSpeaking,
                                     repository = repository,
                                     voiceEngine = voiceEngine,
-                                    onBack = { destination = SaraDestination.HOME },
-                                    onOpenSettings = { destination = SaraDestination.SETTINGS }
+                                    onBack = { destination = SaraDestination.HOME }
                                 )
                             }
 
@@ -176,19 +280,46 @@ class MainActivity : ComponentActivity() {
                                     settings = settings,
                                     memories = memories,
                                     conversationHistory = conversationHistory,
+                                    inboxUnreadCount = unreadInboxCount,
                                     voiceStatus = voiceStatus,
-                                    wakeServiceRunning = wakeServiceRunning,
+                                    backgroundState = backgroundState,
                                     isSpeaking = isSpeaking,
                                     repository = repository,
                                     voiceEngine = voiceEngine,
+                                    initialPage = settingsInitialPage,
                                     onBack = { destination = SaraDestination.HOME },
-                                    onOpenProfile = { destination = SaraDestination.PROFILE }
+                                    onOpenInbox = { destination = SaraDestination.INBOX }
                                 )
                             }
                         }
                     }
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::repository.isInitialized) {
+            val snap = AndroidPermissionHelper.captureSnapshot(applicationContext)
+            repository.updatePermissionStateSnapshot(
+                micGranted = snap.microphoneGranted,
+                overlayGranted = snap.overlayPermissionGranted,
+                batteryUnrestricted = snap.batteryOptimizationIgnored,
+                serviceActive = SaraWakeService.isRunning.value
+            )
+            if (SaraWakeService.isRunning.value) {
+                SaraWakeService.refreshOverlay(applicationContext)
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(SaraBootReceiver.EXTRA_RESUME_WAKE_FROM_BOOT, false)) {
+            val settings = repository.settings.value
+            SaraWakeService.start(applicationContext, settings.customWakeWord, startPaused = false)
         }
     }
 

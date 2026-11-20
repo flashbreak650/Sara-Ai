@@ -52,13 +52,8 @@ data class VoicePlaybackResult(
 
 /**
  * Natural Human Female Bengali Voice Engine for SARA.
- *
- * Tier 1: Gemini 3.8 Neural TTS ('gemini-3.8-flash-tts', voices 'Kore' / 'Zephyr')
- *   - Supports backend /api/tts proxy OR direct Keystore-secured v1beta/interactions REST.
- *   - Produces natural human breathing pauses, warm conversational intonation, and crystal-clear Bengali & English.
- * Tier 2: Highest-Quality Android Device TTS Female Bengali Voice
- *   - Ranks Google network/neural Bengali female voices (bn-BD / bn-IN) ahead of basic offline local voices.
- *   - Applies natural Bengali sentence rhythm & pause formatting without harsh pitch distortion.
+ * Supports 6 expressive female voice personas (Kore, Zephyr, Aoede, Leda, SaraSweet, SaraVelvet)
+ * across Backend Cloud Neural TTS, Direct Keystore Gemini TTS, and Ranked On-Device Android Female TTS.
  */
 class SaraVoiceEngine(
     context: Context,
@@ -70,6 +65,7 @@ class SaraVoiceEngine(
 
     private var tts: TextToSpeech? = null
     private var mediaPlayer: MediaPlayer? = null
+    private var activeCompletionCallback: (() -> Unit)? = null
 
     private val _status = MutableStateFlow(VoiceEngineStatus())
     val status: StateFlow<VoiceEngineStatus> = _status.asStateFlow()
@@ -91,6 +87,13 @@ class SaraVoiceEngine(
             return
         }
 
+        engine.setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+        )
+
         engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {
                 _isSpeaking.value = true
@@ -98,11 +101,15 @@ class SaraVoiceEngine(
 
             override fun onDone(utteranceId: String?) {
                 _isSpeaking.value = false
+                activeCompletionCallback?.invoke()
+                activeCompletionCallback = null
             }
 
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {
                 _isSpeaking.value = false
+                activeCompletionCallback?.invoke()
+                activeCompletionCallback = null
             }
         })
 
@@ -113,17 +120,17 @@ class SaraVoiceEngine(
         val allVoices = runCatching { engine.voices?.toList().orEmpty() }.getOrElse { emptyList() }
         val bengaliVoices = allVoices.filter { it.locale.language.equals("bn", ignoreCase = true) }
 
-        val bestFemaleBengali = selectBestVoiceForLocale(bengaliVoices, VoiceGenderPreference.FEMALE)
-        val bestMaleBengali = selectBestVoiceForLocale(bengaliVoices, VoiceGenderPreference.MALE)
+        val bestFemaleBengali = selectBestVoiceForLocale(bengaliVoices, VoiceGenderPreference.FEMALE, FemaleVoicePersona.KORE)
+        val bestMaleBengali = selectBestVoiceForLocale(bengaliVoices, VoiceGenderPreference.MALE, FemaleVoicePersona.KORE)
 
         val anyFemale = bestFemaleBengali ?: allVoices.firstOrNull { isExplicitFemaleVoice(it) }
         val neuralFemaleAvailable = bestFemaleBengali?.let { isHighQualityOrNetworkVoice(it) } == true
 
         val qualityNote = when {
             bestFemaleBengali == null && bengaliVoices.isEmpty() ->
-                "এই ডিভাইসে অফলাইন বাংলা ভয়েস প্যাক পাওয়া যায়নি। সবচেয়ে স্বাভাবিক মানবিক বাংলা নারী কণ্ঠের জন্য Cloud Neural Female (Gemini TTS) সক্রিয় রাখুন।"
+                "এই ডিভাইসে অফলাইন বাংলা ভয়েস প্যাক পাওয়া যায়নি। সবচেয়ে সুন্দর ও মানবিক বাংলা নারী কণ্ঠের জন্য Cloud Neural Female (Gemini TTS) সক্রিয় রাখুন।"
             !neuralFemaleAvailable ->
-                "অত্যন্ত মিষ্টি ও বাস্তব মানুষের মতো বাংলা নারী কণ্ঠের জন্য Cloud Neural Female (Kore / Zephyr) ব্যবহার করা উত্তম।"
+                "অত্যন্ত মিষ্টি ও বাস্তব মানুষের মতো বাংলা নারী কণ্ঠের জন্য Cloud Neural Female (Kore / Zephyr / Aoede / Leda) ব্যবহার করা উত্তম।"
             else ->
                 "ডিভাইসে উচ্চমানের বাংলা নারী নেটওয়ার্ক ভয়েস (${bestFemaleBengali?.name}) পাওয়া গেছে; ক্লাউড নিউরাল কণ্ঠ আরো বেশি মানবিক ও স্বাভাবিক।"
         }
@@ -163,9 +170,9 @@ class SaraVoiceEngine(
             femaleVoicePersona = persona
         )
         val sampleText = if (settings.voiceLanguage == VoiceLanguageOption.BENGALI) {
-            persona.previewSentenceBn
+            persona.previewSentenceBn.replace("সারা", settings.assistantName.ifBlank { "সারা" })
         } else {
-            persona.previewSentenceEn
+            persona.previewSentenceEn.replace("SARA", settings.assistantName.ifBlank { "SARA" })
         }
         speakText(sampleText, previewSettings, onComplete)
     }
@@ -173,16 +180,21 @@ class SaraVoiceEngine(
     fun speakIfEnabled(
         text: String,
         settings: SaraSettings,
+        onPlaybackFinished: (() -> Unit)? = null,
         onComplete: (VoicePlaybackResult) -> Unit = {}
     ) {
-        if (!settings.voiceResponsesEnabled) return
-        speakText(text, settings, onComplete)
+        if (!settings.voiceResponsesEnabled) {
+            onPlaybackFinished?.invoke()
+            return
+        }
+        speakText(text, settings, onComplete, onPlaybackFinished)
     }
 
     fun speakText(
         text: String,
         settings: SaraSettings,
-        onComplete: (VoicePlaybackResult) -> Unit = {}
+        onComplete: (VoicePlaybackResult) -> Unit = {},
+        onPlaybackFinished: (() -> Unit)? = null
     ) {
         val cleanText = formatNaturalBengaliProsody(text, settings.bengaliPronunciationQuality)
         val endpointUrl = resolveCloudTtsEndpoint(settings)
@@ -191,32 +203,35 @@ class SaraVoiceEngine(
         if (settings.voiceProvider == VoiceProviderMode.CLOUD_NEURAL_FEMALE) {
             if (endpointUrl.isNotEmpty()) {
                 scope.launch {
-                    val cloudResult = playViaBackendTts(endpointUrl, cleanText, settings)
+                    val cloudResult = playViaBackendTts(endpointUrl, cleanText, settings, onPlaybackFinished)
                     if (cloudResult.started) {
                         onComplete(cloudResult)
                     } else if (directApiKey != null) {
-                        val directResult = playViaDirectGeminiTts(directApiKey, cleanText, settings)
-                        finishWithFallbackIfNeeded(directResult, cleanText, settings, onComplete)
+                        val directResult = playViaDirectGeminiTts(directApiKey, cleanText, settings, onPlaybackFinished)
+                        finishWithFallbackIfNeeded(directResult, cleanText, settings, onComplete, onPlaybackFinished)
                     } else {
-                        finishWithFallbackIfNeeded(cloudResult, cleanText, settings, onComplete)
+                        finishWithFallbackIfNeeded(cloudResult, cleanText, settings, onComplete, onPlaybackFinished)
                     }
                 }
                 return
             } else if (directApiKey != null) {
                 scope.launch {
-                    val directResult = playViaDirectGeminiTts(directApiKey, cleanText, settings)
-                    finishWithFallbackIfNeeded(directResult, cleanText, settings, onComplete)
+                    val directResult = playViaDirectGeminiTts(directApiKey, cleanText, settings, onPlaybackFinished)
+                    finishWithFallbackIfNeeded(directResult, cleanText, settings, onComplete, onPlaybackFinished)
                 }
                 return
             }
         }
 
-        val nativeResult = speakWithNativeTts(cleanText, settings)
+        val nativeResult = speakWithNativeTts(cleanText, settings, onPlaybackFinished)
+        if (!nativeResult.started) {
+            onPlaybackFinished?.invoke()
+        }
         if (settings.voiceProvider == VoiceProviderMode.CLOUD_NEURAL_FEMALE && endpointUrl.isEmpty() && directApiKey == null) {
             onComplete(
                 nativeResult.copy(
                     message = if (nativeResult.started) {
-                        "${nativeResult.message} (সর্বোচ্চ মানবিক নিউরাল নারী কণ্ঠের জন্য Settings > Cloud TTS URL বা API Key যোগ করুন)"
+                        "${nativeResult.message} (সর্বোচ্চ মানবিক নিউরাল নারী কণ্ঠের জন্য Cloud TTS URL বা API Key যোগ করুন)"
                     } else {
                         nativeResult.message
                     }
@@ -231,13 +246,17 @@ class SaraVoiceEngine(
         cloudResult: VoicePlaybackResult,
         cleanText: String,
         settings: SaraSettings,
-        onComplete: (VoicePlaybackResult) -> Unit
+        onComplete: (VoicePlaybackResult) -> Unit,
+        onPlaybackFinished: (() -> Unit)?
     ) {
         if (cloudResult.started) {
             onComplete(cloudResult)
             return
         }
-        val nativeFallback = speakWithNativeTts(cleanText, settings)
+        val nativeFallback = speakWithNativeTts(cleanText, settings, onPlaybackFinished)
+        if (!nativeFallback.started) {
+            onPlaybackFinished?.invoke()
+        }
         onComplete(
             if (nativeFallback.started) {
                 nativeFallback.copy(
@@ -265,7 +284,8 @@ class SaraVoiceEngine(
     private suspend fun playViaBackendTts(
         endpointUrl: String,
         text: String,
-        settings: SaraSettings
+        settings: SaraSettings,
+        onPlaybackFinished: (() -> Unit)?
     ): VoicePlaybackResult = withContext(Dispatchers.IO) {
         var conn: HttpURLConnection? = null
         try {
@@ -315,7 +335,7 @@ class SaraVoiceEngine(
             }
 
             val wavBytes = Base64.decode(audioB64, Base64.DEFAULT)
-            playWavBytes(wavBytes, settings)
+            playWavBytes(wavBytes, settings, onPlaybackFinished)
 
             val resolvedVoice = json.optString("voiceName", voiceName)
             VoicePlaybackResult(
@@ -337,35 +357,25 @@ class SaraVoiceEngine(
     private suspend fun playViaDirectGeminiTts(
         apiKey: String,
         text: String,
-        settings: SaraSettings
+        settings: SaraSettings,
+        onPlaybackFinished: (() -> Unit)?
     ): VoicePlaybackResult = withContext(Dispatchers.IO) {
         val isBn = settings.voiceLanguage == VoiceLanguageOption.BENGALI
-        val voiceName = if (settings.voiceGender == VoiceGenderPreference.MALE) {
-            "Charon"
-        } else {
-            settings.femaleVoicePersona.voiceId
-        }
+        val persona = settings.femaleVoicePersona
+        val primaryVoice = if (settings.voiceGender == VoiceGenderPreference.MALE) "Charon" else persona.geminiVoiceId
+        val fallbackVoice = if (settings.voiceGender == VoiceGenderPreference.MALE) "Charon" else persona.fallbackVoiceId
         val useBreaths = settings.bengaliPronunciationQuality == BengaliPronunciationQuality.NATURAL_HUMAN
         val styledText = if (useBreaths) formatBreathTags(text, isBn) else text
-        val styleDesc = buildNaturalStylePrompt(voiceName, isBn, settings.assistantName.ifBlank { "SARA" })
+        val styleDesc = buildNaturalStylePrompt(
+            if (settings.voiceGender == VoiceGenderPreference.MALE) "Charon" else persona.voiceId,
+            isBn,
+            settings.assistantName.ifBlank { "SARA" }
+        )
         val speechLang = if (isBn) "bn-BD" else "en-US"
 
-        val primary = callGeminiInteractionsTts(
-            apiKey = apiKey,
-            model = "gemini-3.8-flash-tts",
-            text = styledText,
-            style = styleDesc,
-            language = speechLang,
-            voiceName = voiceName
-        )
-        val audioBytes = primary ?: callGeminiInteractionsTts(
-            apiKey = apiKey,
-            model = "gemini-3.8-flash-lite-tts",
-            text = text,
-            style = styleDesc,
-            language = speechLang,
-            voiceName = voiceName
-        )
+        val audioBytes = callGeminiInteractionsTts(apiKey, "gemini-3.8-flash-tts", styledText, styleDesc, speechLang, primaryVoice)
+            ?: (if (fallbackVoice != primaryVoice) callGeminiInteractionsTts(apiKey, "gemini-3.8-flash-tts", styledText, styleDesc, speechLang, fallbackVoice) else null)
+            ?: callGeminiInteractionsTts(apiKey, "gemini-3.8-flash-lite-tts", text, styleDesc, speechLang, fallbackVoice)
 
         if (audioBytes == null || audioBytes.isEmpty()) {
             return@withContext VoicePlaybackResult(
@@ -375,11 +385,12 @@ class SaraVoiceEngine(
             )
         }
 
-        playWavBytes(audioBytes, settings)
+        playWavBytes(audioBytes, settings, onPlaybackFinished)
+        val displayLabel = if (settings.voiceGender == VoiceGenderPreference.MALE) "Charon" else persona.voiceId
         VoicePlaybackResult(
             started = true,
-            providerUsed = "Gemini 3.8 Neural ($voiceName)",
-            message = "স্বাভাবিক মানবিক নারী কণ্ঠ ($voiceName) চালু হয়েছে।"
+            providerUsed = "Gemini 3.8 Neural ($displayLabel)",
+            message = "স্বাভাবিক মানবিক নারী কণ্ঠ ($displayLabel) চালু হয়েছে।"
         )
     }
 
@@ -423,10 +434,7 @@ class SaraVoiceEngine(
                         }
                     )
                 )
-                put(
-                    "response_format",
-                    JSONObject().put("type", "audio")
-                )
+                put("response_format", JSONObject().put("type", "audio"))
                 put(
                     "generation_config",
                     JSONObject().put(
@@ -456,6 +464,11 @@ class SaraVoiceEngine(
     }
 
     private fun extractAudioBase64(root: JSONObject): String? {
+        val outputAudio = root.optJSONObject("output_audio")
+        if (outputAudio != null) {
+            val data = outputAudio.optString("data", "")
+            if (data.isNotBlank()) return data
+        }
         val outputs = root.optJSONArray("outputs")
         if (outputs != null) {
             for (i in 0 until outputs.length()) {
@@ -483,12 +496,17 @@ class SaraVoiceEngine(
         return null
     }
 
-    private suspend fun playWavBytes(wavBytes: ByteArray, settings: SaraSettings) {
+    private suspend fun playWavBytes(
+        wavBytes: ByteArray,
+        settings: SaraSettings,
+        onPlaybackFinished: (() -> Unit)?
+    ) {
         val tempFile = File(appContext.cacheDir, "sara_neural_female_voice.wav")
         tempFile.writeBytes(wavBytes)
 
         withContext(Dispatchers.Main) {
             stopPlayback()
+            activeCompletionCallback = onPlaybackFinished
             _isSpeaking.value = true
             mediaPlayer = MediaPlayer().apply {
                 setAudioAttributes(
@@ -504,11 +522,15 @@ class SaraVoiceEngine(
                     _isSpeaking.value = false
                     mp.release()
                     if (mediaPlayer === mp) mediaPlayer = null
+                    activeCompletionCallback?.invoke()
+                    activeCompletionCallback = null
                 }
                 setOnErrorListener { mp, _, _ ->
                     _isSpeaking.value = false
                     mp.release()
                     if (mediaPlayer === mp) mediaPlayer = null
+                    activeCompletionCallback?.invoke()
+                    activeCompletionCallback = null
                     true
                 }
                 prepare()
@@ -522,7 +544,11 @@ class SaraVoiceEngine(
         }
     }
 
-    private fun speakWithNativeTts(text: String, settings: SaraSettings): VoicePlaybackResult {
+    private fun speakWithNativeTts(
+        text: String,
+        settings: SaraSettings,
+        onPlaybackFinished: (() -> Unit)? = null
+    ): VoicePlaybackResult {
         val engine = tts ?: return VoicePlaybackResult(
             started = false,
             providerUsed = "Android TTS",
@@ -550,14 +576,20 @@ class SaraVoiceEngine(
             engine.voices?.filter { it.locale.language.equals(targetLocale.language, ignoreCase = true) }.orEmpty()
         }.getOrElse { emptyList() }
 
-        val chosenVoice = selectBestVoiceForLocale(allLocaleVoices, settings.voiceGender)
+        val chosenVoice = selectBestVoiceForLocale(allLocaleVoices, settings.voiceGender, settings.femaleVoicePersona)
         engine.language = chosenVoice?.locale ?: targetLocale
         if (chosenVoice != null) {
             engine.voice = chosenVoice
         }
 
-        // Smooth natural speed and natural pitch (never fake voice gender via artificial pitch distortion)
-        engine.setSpeechRate(settings.speechSpeed.coerceIn(0.6f, 1.8f))
+        activeCompletionCallback = onPlaybackFinished
+
+        val speedMod = when (settings.femaleVoicePersona) {
+            FemaleVoicePersona.LEDA, FemaleVoicePersona.SARA_VELVET -> -0.04f
+            FemaleVoicePersona.AOEDE, FemaleVoicePersona.SARA_SWEET -> +0.03f
+            else -> 0f
+        }
+        engine.setSpeechRate((settings.speechSpeed + speedMod).coerceIn(0.6f, 1.8f))
         engine.setPitch(settings.speechPitch.coerceIn(0.80f, 1.35f))
 
         val params = Bundle().apply {
@@ -581,6 +613,7 @@ class SaraVoiceEngine(
     }
 
     fun stopPlayback() {
+        activeCompletionCallback = null
         tts?.stop()
         runCatching {
             mediaPlayer?.stop()
@@ -629,23 +662,44 @@ class SaraVoiceEngine(
                 "Warm, friendly adult male voice speaking natural clear English with conversational pacing."
             }
         }
-        if (voiceName == "Zephyr") {
-            return if (isBengali) {
+        return when (voiceName) {
+            "Zephyr" -> if (isBengali) {
                 "Sweet, soft, caring young adult Bengali-speaking woman ($assistantName) talking gently in person with crystal-clear Bengali diction, warm tone, natural breathing pauses, and zero robotic stiffness."
             } else {
                 "Sweet, soft, caring adult woman ($assistantName) speaking natural conversational English with gentle warmth and human breathing pauses."
             }
-        }
-        return if (isBengali) {
-            "Extremely natural, sweet, warm, and gentle adult Bengali-speaking woman ($assistantName) talking like a caring real person in face-to-face conversation. Smooth velvety tone without metallic artifacts, crystal-clear Bengali pronunciation, soft emotional expressiveness, and natural breathing pauses."
-        } else {
-            "Extremely natural, sweet, warm, and gentle adult woman ($assistantName) speaking fluent conversational English with soft emotional warmth and natural human breathing pauses."
+            "Aoede" -> if (isBengali) {
+                "Melodic, bright, lively adult Bengali-speaking woman ($assistantName) speaking with expressive musical clarity, cheerful warmth, effortless pronunciation, and natural conversational pauses."
+            } else {
+                "Melodic, bright, lively adult woman ($assistantName) speaking expressive conversational English with cheerful warmth and natural pauses."
+            }
+            "Leda" -> if (isBengali) {
+                "Calm, affectionate, poised adult Bengali-speaking woman ($assistantName) speaking softly with soothing reassurance, refined pronunciation, and gentle natural breathing pauses."
+            } else {
+                "Calm, affectionate, poised adult woman ($assistantName) speaking softly with soothing reassurance and gentle breathing pauses."
+            }
+            "SaraSweet" -> if (isBengali) {
+                "Joyful, sweet, best-friend adult Bengali-speaking woman ($assistantName) chatting warmly with an affectionate smile, natural Bengali rhythm, and gentle breathing pauses."
+            } else {
+                "Joyful, sweet, friendly adult woman ($assistantName) chatting warmly with natural rhythm and breathing pauses."
+            }
+            "SaraVelvet" -> if (isBengali) {
+                "Velvety, serene, deeply soothing adult Bengali-speaking woman ($assistantName) with calm graceful pacing, soft breathy warmth, and clear Bengali diction."
+            } else {
+                "Velvety, serene, deeply soothing adult woman ($assistantName) with calm graceful pacing and warm clarity."
+            }
+            else -> if (isBengali) {
+                "Extremely natural, sweet, warm, and gentle adult Bengali-speaking woman ($assistantName) talking like a caring real person in face-to-face conversation. Smooth velvety tone without metallic artifacts, crystal-clear Bengali pronunciation, soft emotional expressiveness, and natural breathing pauses."
+            } else {
+                "Extremely natural, sweet, warm, and gentle adult woman ($assistantName) speaking fluent conversational English with soft emotional warmth and natural human breathing pauses."
+            }
         }
     }
 
     private fun selectBestVoiceForLocale(
         voices: List<Voice>,
-        preference: VoiceGenderPreference
+        preference: VoiceGenderPreference,
+        persona: FemaleVoicePersona
     ): Voice? {
         if (voices.isEmpty()) return null
 
@@ -658,8 +712,7 @@ class SaraVoiceEngine(
             VoiceGenderPreference.SYSTEM_DEFAULT -> voices
         }
 
-        val candidates = if (genderFiltered.isNotEmpty()) genderFiltered else voices
-        return candidates.maxByOrNull { voice ->
+        val candidates = (if (genderFiltered.isNotEmpty()) genderFiltered else voices).sortedByDescending { voice ->
             var score = 0
             if (voice.locale.country.equals("BD", ignoreCase = true)) score += 40
             else if (voice.locale.country.equals("IN", ignoreCase = true)) score += 20
@@ -668,6 +721,12 @@ class SaraVoiceEngine(
             if (isExplicitFemaleVoice(voice) && preference == VoiceGenderPreference.FEMALE) score += 25
             score
         }
+
+        if (candidates.size > 1 && preference == VoiceGenderPreference.FEMALE) {
+            val index = persona.ordinal % minOf(candidates.size, 3)
+            return candidates[index]
+        }
+        return candidates.firstOrNull()
     }
 
     private fun isHighQualityOrNetworkVoice(voice: Voice): Boolean {

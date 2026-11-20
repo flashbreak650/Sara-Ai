@@ -32,8 +32,8 @@ enum class VoiceProviderMode(
     CLOUD_NEURAL_FEMALE(
         labelBn = "ক্লাউড নিউরাল নারী কণ্ঠ",
         labelEn = "Cloud Neural Female (Gemini TTS)",
-        descriptionBn = "অত্যন্ত স্বাভাবিক, মিষ্টি, উষ্ণ ও মানবিক বাংলা নারী কণ্ঠ (Kore / Zephyr)",
-        descriptionEn = "Sweet, warm, human-like Bengali female voice via Gemini Neural TTS"
+        descriptionBn = "৬টি মিষ্টি, উষ্ণ ও মানবিক বাংলা নারী কণ্ঠ (Kore, Zephyr, Aoede, Leda ও আরও)",
+        descriptionEn = "Six sweet, warm, human-like Bengali female voices via Gemini Neural TTS"
     ),
     ANDROID_NATIVE_TTS(
         labelBn = "ডিভাইস অফলাইন TTS",
@@ -45,24 +45,73 @@ enum class VoiceProviderMode(
 
 enum class FemaleVoicePersona(
     val voiceId: String,
+    val geminiVoiceId: String,
+    val fallbackVoiceId: String,
     val labelBn: String,
     val labelEn: String,
+    val descriptionBn: String,
     val previewSentenceBn: String,
     val previewSentenceEn: String
 ) {
     KORE(
         voiceId = "Kore",
-        labelBn = "কোরি — উষ্ণ, মিষ্টি ও যত্নশীল",
-        labelEn = "Kore — Sweet, Warm & Caring",
+        geminiVoiceId = "Kore",
+        fallbackVoiceId = "Kore",
+        labelBn = "কোরি — মিষ্টি ও উষ্ণ",
+        labelEn = "Kore — Sweet & Warm",
+        descriptionBn = "সবচেয়ে স্বাভাবিক, প্রাণবন্ত ও আন্তরিক বাংলা নারী কণ্ঠ।",
         previewSentenceBn = "আসসালামু আলাইকুম! আমি সারা। আমি আপনার পাশে আছি—বলুন, আজ কীভাবে সাহায্য করতে পারি?",
         previewSentenceEn = "Hello! I am SARA. I'm right here with you—how can I help today?"
     ),
     ZEPHYR(
         voiceId = "Zephyr",
-        labelBn = "জেফির — কোমল, শান্ত ও স্নিগ্ধ",
-        labelEn = "Zephyr — Soft, Gentle & Calm",
+        geminiVoiceId = "Zephyr",
+        fallbackVoiceId = "Zephyr",
+        labelBn = "জেফির — কোমল ও স্নিগ্ধ",
+        labelEn = "Zephyr — Soft & Gentle",
+        descriptionBn = "মৃদু, শান্ত ও আরামদায়ক ভঙ্গির বাংলা নারী কণ্ঠ।",
         previewSentenceBn = "নমস্কার! আমি সারা। চলুন শান্তভাবে আপনার কাজগুলো একসাথে গুছিয়ে নিই।",
         previewSentenceEn = "Hi there! I am SARA. Let's calmly organize everything you need today."
+    ),
+    AOEDE(
+        voiceId = "Aoede",
+        geminiVoiceId = "Aoede",
+        fallbackVoiceId = "Kore",
+        labelBn = "আওয়েদি — সুরেলা ও উজ্জ্বল",
+        labelEn = "Aoede — Melodic & Bright",
+        descriptionBn = "সুরেলা, উজ্জ্বল ও স্পষ্ট উচ্চারণের মধুর বাংলা কণ্ঠ।",
+        previewSentenceBn = "হ্যালো! আপনার দিনটি সুন্দর হোক। যেকোনো প্রশ্ন বা কাজের কথা আমাকে বলুন।",
+        previewSentenceEn = "Hello! Wishing you a bright day. Ask me anything whenever you're ready."
+    ),
+    LEDA(
+        voiceId = "Leda",
+        geminiVoiceId = "Leda",
+        fallbackVoiceId = "Zephyr",
+        labelBn = "লেদা — শান্ত ও মমতাময়ী",
+        labelEn = "Leda — Calm & Affectionate",
+        descriptionBn = "ধীরস্থির, যত্নশীল ও মমতাময়ী বাংলা নারী কণ্ঠ।",
+        previewSentenceBn = "আমি সারা, সবসময় আপনার কথা শুনতে প্রস্তুত। নিশ্চিন্তে বলুন কী প্রয়োজন।",
+        previewSentenceEn = "I'm SARA, always listening attentively. Tell me calmly what you need."
+    ),
+    SARA_SWEET(
+        voiceId = "SaraSweet",
+        geminiVoiceId = "Kore",
+        fallbackVoiceId = "Kore",
+        labelBn = "সারা সুইট — মধুর আড্ডা",
+        labelEn = "Sara Sweet — Warm Companion",
+        descriptionBn = "বন্ধুত্বপূর্ণ, হাসিখুশি ও ঘরোয়া আলাপের মধুর কণ্ঠ।",
+        previewSentenceBn = "আরে বাহ! আপনি ডেকেছেন শুনেই চলে এলাম। বলুন, আজ কোন কাজটি আগে করব?",
+        previewSentenceEn = "Hey! I'm right here as soon as you called. What should we do first today?"
+    ),
+    SARA_VELVET(
+        voiceId = "SaraVelvet",
+        geminiVoiceId = "Zephyr",
+        fallbackVoiceId = "Zephyr",
+        labelBn = "সারা ভেলভেট — রেশমি প্রশান্ত",
+        labelEn = "Sara Velvet — Soothing Serene",
+        descriptionBn = "সন্ধ্যার শান্ত আলাপ ও রিমাইন্ডারের জন্য রেশমি কোমল কণ্ঠ।",
+        previewSentenceBn = "একটু বিশ্রাম নিন, আমি আপনার সব রিমাইন্ডার ও মেসেজ গুছিয়ে রাখছি।",
+        previewSentenceEn = "Take a calm breath—I'm keeping all your messages and reminders organized."
     )
 }
 
@@ -102,22 +151,16 @@ enum class GeminiModelOption(
     )
 }
 
-enum class ThemeModeOption(val labelBn: String, val labelEn: String) {
-    DARK("ডার্ক", "Dark"),
-    LIGHT("লাইট", "Light"),
-    SYSTEM("সিস্টেম", "System Default")
-}
-
 enum class AccentColorOption(
     val labelBn: String,
     val labelEn: String,
     val primaryHex: Long,
     val secondaryHex: Long
 ) {
-    CYAN("সায়ান", "Cyan", 0xFF22D3EE, 0xFF8B5CF6),
-    ELECTRIC_BLUE("ইলেকট্রিক ব্লু", "Electric Blue", 0xFF38BDF8, 0xFF818CF8),
-    VIOLET("ভায়োলেট", "Violet", 0xFF8B5CF6, 0xFF22D3EE),
-    EMERALD("এমেরাল্ড", "Emerald", 0xFF10B981, 0xFF22D3EE)
+    CYAN("সায়ান", "Cyan", 0xFF0891B2, 0xFF0284C7),
+    ELECTRIC_BLUE("ইলেকট্রিক ব্লু", "Electric Blue", 0xFF0284C7, 0xFF6366F1),
+    VIOLET("ভায়োলেট", "Violet", 0xFF7C3AED, 0xFF0891B2),
+    EMERALD("এমেরাল্ড", "Emerald", 0xFF059669, 0xFF0891B2)
 }
 
 enum class TextSizeOption(val labelBn: String, val labelEn: String, val scaleFactor: Float) {
@@ -132,6 +175,23 @@ enum class ApiConnectionState {
     CONNECTED,
     ERROR
 }
+
+enum class InboxCategory(val labelBn: String, val labelEn: String) {
+    VOICE_REPLY("ভয়েস উত্তর", "Voice"),
+    WAKE_ALERT("ব্যাকগ্রাউন্ড", "Outside App"),
+    REMINDER("রিমাইন্ডার", "Reminder"),
+    SYSTEM("সিস্টেম", "System")
+}
+
+data class SaraInboxItem(
+    val id: String,
+    val title: String,
+    val body: String,
+    val category: InboxCategory = InboxCategory.VOICE_REPLY,
+    val timestampMillis: Long,
+    val isRead: Boolean = false,
+    val senderVoicePersona: String? = null
+)
 
 data class MemoryItem(
     val id: String,
@@ -167,9 +227,18 @@ data class SaraSettings(
     val bengaliPronunciationQuality: BengaliPronunciationQuality = BengaliPronunciationQuality.NATURAL_HUMAN,
     val cloudTtsEndpointUrl: String = "",
 
-    // 3. Wake Word Settings
+    // 3. Background Home Screen Assistant & Wake Word Settings
     val wakeWordEnabled: Boolean = false,
+    val wakeListeningPaused: Boolean = false,
     val customWakeWord: String = "Hey SARA",
+    val floatingOverlayEnabled: Boolean = true,
+    val autoRestoreOnBoot: Boolean = true,
+
+    // Persisted Permission & Service Snapshots
+    val lastServiceActive: Boolean = false,
+    val lastRecordedMicPermission: Boolean = false,
+    val lastRecordedOverlayPermission: Boolean = false,
+    val lastRecordedBatteryUnrestricted: Boolean = false,
 
     // 5. AI Brain Settings
     val selectedModel: GeminiModelOption = GeminiModelOption.GEMINI_HYDROGEN,
@@ -183,8 +252,7 @@ data class SaraSettings(
     val memoryEnabled: Boolean = true,
     val memoryPrivacyMask: Boolean = true,
 
-    // 7. Appearance
-    val themeMode: ThemeModeOption = ThemeModeOption.DARK,
+    // 7. Appearance (Light-Only Theme)
     val accentColor: AccentColorOption = AccentColorOption.CYAN,
     val animationsEnabled: Boolean = true,
     val textSize: TextSizeOption = TextSizeOption.MEDIUM,

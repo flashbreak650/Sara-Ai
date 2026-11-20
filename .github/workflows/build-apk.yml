@@ -41,28 +41,29 @@ jobs:
 
       - name: Prepare APK artifact name
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk SARA-v0.3.1-voice-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk SARA-v0.4.0-assistant-debug.apk
 
       - name: Upload APK workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SARA-v0.3.1-voice-debug
-          path: SARA-v0.3.1-voice-debug.apk
+          name: SARA-v0.4.0-assistant-debug
+          path: SARA-v0.4.0-assistant-debug.apk
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.3.1-voice-${{ github.run_number }}
-          name: SARA Natural Female Bengali Voice (Build #${{ github.run_number }})
+          tag_name: v0.4.0-assistant-${{ github.run_number }}
+          name: SARA Outside-App Assistant & Light Hub v0.4.0 (Build #${{ github.run_number }})
           body: |
-            SARA Personal AI Assistant — Natural Human Female Bengali Voice Upgrade APK.
-            - Upgraded Voice System to Gemini 3.8 Neural TTS (`gemini-3.8-flash-tts` with `gemini-3.8-flash-lite-tts` fallback)
-            - Natural, warm, sweet human female Bengali personas: `Kore` (Sweet, Warm & Caring) and `Zephyr` (Soft, Gentle & Calm) with live voice preview
-            - Natural Bengali & English pronunciation with breathing pauses and smooth intonation
-            - Smart Android Native TTS fallback ranking high-quality `bn-BD` / `bn-IN` network & neural female voices
-            - All existing UI, colors, buttons, layouts, AI Profile, and 10-Module Settings preserved intact
+            SARA Personal AI Assistant — v0.4.0 Outside-App Assistant, Permanent DataStore & Light Hub APK.
+            - **Outside-App Home Screen Assistant**: Continuous "Hey SARA" wake-word Foreground Service, speaker responses, Talk/Pause/Resume/Stop controls, draggable floating SARA bubble & compact expandable overlay card (`SYSTEM_ALERT_WINDOW`), and boot auto-restore (`SaraBootReceiver`)
+            - **Permanent Settings Persistence (Jetpack DataStore)**: Every preference, permission snapshot, memory note, conversation turn, and inbox message persists across restarts/updates, plus an explicit user-triggered Reset Settings option
+            - **Crisp Light-Only Theme**: Dark mode removed completely; crisp white cards, soft blue gradients, and cyan accents throughout
+            - **Feature Button Hub Settings & Dedicated Sub-Pages**: Clean button grid for every SARA capability opening dedicated sub-pages
+            - **6 Beautiful Female Bengali Voices**: Kore, Zephyr, Aoede, Leda, SaraSweet & SaraVelvet with individual live preview buttons
+            - **Dedicated SARA Inbox**: Stores outside-app replies, voice responses, and custom reminders with unread counter & speak-aloud support
             - Package: `com.sara.assistant`
-          files: SARA-v0.3.1-voice-debug.apk
+          files: SARA-v0.4.0-assistant-debug.apk
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
