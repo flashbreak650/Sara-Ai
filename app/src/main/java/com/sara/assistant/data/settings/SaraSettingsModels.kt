@@ -18,8 +18,8 @@ enum class AnswerLength(val labelBn: String, val labelEn: String) {
 }
 
 enum class VoiceGenderPreference(val labelBn: String, val labelEn: String) {
-    MALE("পুরুষ কণ্ঠ (প্রস্তাবিত)", "Natural Male"),
-    FEMALE("নারী কণ্ঠ", "Female"),
+    FEMALE("মধুর নারী কণ্ঠ (প্রস্তাবিত)", "Natural Female"),
+    MALE("পুরুষ কণ্ঠ", "Male"),
     SYSTEM_DEFAULT("সিস্টেম ডিফল্ট", "System Default")
 }
 
@@ -29,22 +29,45 @@ enum class VoiceProviderMode(
     val descriptionBn: String,
     val descriptionEn: String
 ) {
-    CLOUD_NEURAL_MALE(
-        labelBn = "ক্লাউড নিউরাল পুরুষ কণ্ঠ",
-        labelEn = "Cloud Neural Male (Gemini TTS)",
-        descriptionBn = "স্বাভাবিক, উষ্ণ ও মানবিক বাংলা পুরুষ কণ্ঠ (Charon)",
-        descriptionEn = "Warm, natural human-like Bengali male voice via Cloud TTS"
+    CLOUD_NEURAL_FEMALE(
+        labelBn = "ক্লাউড নিউরাল নারী কণ্ঠ",
+        labelEn = "Cloud Neural Female (Gemini TTS)",
+        descriptionBn = "অত্যন্ত স্বাভাবিক, মিষ্টি, উষ্ণ ও মানবিক বাংলা নারী কণ্ঠ (Kore / Zephyr)",
+        descriptionEn = "Sweet, warm, human-like Bengali female voice via Gemini Neural TTS"
     ),
     ANDROID_NATIVE_TTS(
         labelBn = "ডিভাইস অফলাইন TTS",
         labelEn = "On-Device Android TTS",
-        descriptionBn = "ফোনের নিজস্ব ইঞ্জিন ব্যবহার করে (পুরুষ কণ্ঠ সীমিত হতে পারে)",
-        descriptionEn = "Uses installed phone TTS engine (male Bengali depends on device)"
+        descriptionBn = "ফোনের সর্বোচ্চ মানের বাংলা নারী নিউরাল/অফলাইন কণ্ঠ ব্যবহার করে",
+        descriptionEn = "Uses highest-quality available Bengali female voice on device"
+    )
+}
+
+enum class FemaleVoicePersona(
+    val voiceId: String,
+    val labelBn: String,
+    val labelEn: String,
+    val previewSentenceBn: String,
+    val previewSentenceEn: String
+) {
+    KORE(
+        voiceId = "Kore",
+        labelBn = "কোরি — উষ্ণ, মিষ্টি ও যত্নশীল",
+        labelEn = "Kore — Sweet, Warm & Caring",
+        previewSentenceBn = "আসসালামু আলাইকুম! আমি সারা। আমি আপনার পাশে আছি—বলুন, আজ কীভাবে সাহায্য করতে পারি?",
+        previewSentenceEn = "Hello! I am SARA. I'm right here with you—how can I help today?"
+    ),
+    ZEPHYR(
+        voiceId = "Zephyr",
+        labelBn = "জেফির — কোমল, শান্ত ও স্নিগ্ধ",
+        labelEn = "Zephyr — Soft, Gentle & Calm",
+        previewSentenceBn = "নমস্কার! আমি সারা। চলুন শান্তভাবে আপনার কাজগুলো একসাথে গুছিয়ে নিই।",
+        previewSentenceEn = "Hi there! I am SARA. Let's calmly organize everything you need today."
     )
 }
 
 enum class BengaliPronunciationQuality(val labelBn: String, val labelEn: String) {
-    NATURAL_HUMAN("প্রাকৃতিক ও স্পষ্ট (Natural Pauses)", "Natural Pauses & Tone"),
+    NATURAL_HUMAN("প্রাকৃতিক শ্বাস-বিরতি ও ছন্দ", "Natural Breathing Pauses & Rhythm"),
     STANDARD_FAST("দ্রুত ও সরাসরি", "Standard Direct")
 }
 
@@ -127,19 +150,20 @@ data class SaraSettings(
     // 1. Identity & AI Personality
     val assistantName: String = "SARA",
     val assistantSubtitle: String = "Your Personal AI",
-    val personalityDescription: String = "Warm, calm, intelligent Bengali-first personal AI companion",
+    val personalityDescription: String = "Warm, caring, intelligent Bengali-first personal AI companion",
     val personalityMode: AssistantPersonalityMode = AssistantPersonalityMode.FRIENDLY,
     val responseStyle: ResponseStyle = ResponseStyle.BALANCED,
     val answerLength: AnswerLength = AnswerLength.SHORT,
 
-    // 2. Natural Male Voice Settings
+    // 2. Natural Human Female Bengali Voice Settings
     val voiceResponsesEnabled: Boolean = true,
-    val voiceProvider: VoiceProviderMode = VoiceProviderMode.CLOUD_NEURAL_MALE,
-    val voiceGender: VoiceGenderPreference = VoiceGenderPreference.MALE,
-    val speechSpeed: Float = 0.98f,
+    val voiceProvider: VoiceProviderMode = VoiceProviderMode.CLOUD_NEURAL_FEMALE,
+    val voiceGender: VoiceGenderPreference = VoiceGenderPreference.FEMALE,
+    val femaleVoicePersona: FemaleVoicePersona = FemaleVoicePersona.KORE,
+    val speechSpeed: Float = 0.96f,
     val speechPitch: Float = 1.0f,
     val voiceLanguage: VoiceLanguageOption = VoiceLanguageOption.BENGALI,
-    val voiceVolume: Float = 0.90f,
+    val voiceVolume: Float = 0.92f,
     val bengaliPronunciationQuality: BengaliPronunciationQuality = BengaliPronunciationQuality.NATURAL_HUMAN,
     val cloudTtsEndpointUrl: String = "",
 

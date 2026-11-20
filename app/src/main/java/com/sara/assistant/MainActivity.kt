@@ -57,7 +57,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         repository = SaraSettingsRepository(applicationContext)
-        voiceEngine = SaraVoiceEngine(applicationContext)
+        voiceEngine = SaraVoiceEngine(applicationContext, repository.secureKeyStorage)
 
         setContent {
             val settings by repository.settings.collectAsState()

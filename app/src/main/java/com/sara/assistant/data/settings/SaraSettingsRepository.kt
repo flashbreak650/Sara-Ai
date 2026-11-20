@@ -120,8 +120,9 @@ class SaraSettingsRepository(context: Context) {
             answerLength = enumOrDefault(prefs.getString(KEY_ANSWER_LENGTH, null), defaults.answerLength),
 
             voiceResponsesEnabled = prefs.getBoolean(KEY_VOICE_ENABLED, defaults.voiceResponsesEnabled),
-            voiceProvider = enumOrDefault(prefs.getString(KEY_VOICE_PROVIDER, null), defaults.voiceProvider),
+            voiceProvider = loadVoiceProvider(prefs.getString(KEY_VOICE_PROVIDER, null), defaults.voiceProvider),
             voiceGender = enumOrDefault(prefs.getString(KEY_VOICE_GENDER, null), defaults.voiceGender),
+            femaleVoicePersona = enumOrDefault(prefs.getString(KEY_VOICE_PERSONA, null), defaults.femaleVoicePersona),
             speechSpeed = prefs.getFloat(KEY_SPEECH_SPEED, defaults.speechSpeed).coerceIn(0.5f, 2.0f),
             speechPitch = prefs.getFloat(KEY_SPEECH_PITCH, defaults.speechPitch).coerceIn(0.5f, 2.0f),
             voiceLanguage = enumOrDefault(prefs.getString(KEY_VOICE_LANGUAGE, null), defaults.voiceLanguage),
@@ -177,6 +178,7 @@ class SaraSettingsRepository(context: Context) {
             .putBoolean(KEY_VOICE_ENABLED, s.voiceResponsesEnabled)
             .putString(KEY_VOICE_PROVIDER, s.voiceProvider.name)
             .putString(KEY_VOICE_GENDER, s.voiceGender.name)
+            .putString(KEY_VOICE_PERSONA, s.femaleVoicePersona.name)
             .putFloat(KEY_SPEECH_SPEED, s.speechSpeed)
             .putFloat(KEY_SPEECH_PITCH, s.speechPitch)
             .putString(KEY_VOICE_LANGUAGE, s.voiceLanguage.name)
@@ -283,6 +285,12 @@ class SaraSettingsRepository(context: Context) {
         prefs.edit().putString(KEY_CONVERSATIONS, arr.toString()).apply()
     }
 
+    private fun loadVoiceProvider(raw: String?, fallback: VoiceProviderMode): VoiceProviderMode {
+        if (raw.isNullOrBlank()) return fallback
+        if (raw == "CLOUD_NEURAL_MALE") return VoiceProviderMode.CLOUD_NEURAL_FEMALE
+        return enumOrDefault(raw, fallback)
+    }
+
     private inline fun <reified T : Enum<T>> enumOrDefault(raw: String?, fallback: T): T {
         if (raw.isNullOrBlank()) return fallback
         return try {
@@ -303,6 +311,7 @@ class SaraSettingsRepository(context: Context) {
         const val KEY_VOICE_ENABLED = "voice_enabled"
         const val KEY_VOICE_PROVIDER = "voice_provider"
         const val KEY_VOICE_GENDER = "voice_gender"
+        const val KEY_VOICE_PERSONA = "female_voice_persona"
         const val KEY_SPEECH_SPEED = "speech_speed"
         const val KEY_SPEECH_PITCH = "speech_pitch"
         const val KEY_VOICE_LANGUAGE = "voice_language"

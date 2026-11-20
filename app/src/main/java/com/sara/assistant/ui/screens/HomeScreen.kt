@@ -339,7 +339,7 @@ fun HomeScreen(
                     QuickActionCard(
                         icon = Icons.Rounded.RecordVoiceOver,
                         title = if (language == AppLanguage.BENGALI) "ভয়েস পরীক্ষা" else "Test Voice",
-                        subtitle = if (language == AppLanguage.BENGALI) "স্বাভাবিক পুরুষ কণ্ঠ" else "Natural male voice",
+                        subtitle = if (language == AppLanguage.BENGALI) "প্রাকৃতিক নারী কণ্ঠ" else "Natural female voice",
                         onClick = {
                             val sample = if (language == AppLanguage.BENGALI) {
                                 "আসসালামু আলাইকুম! আমি $assistantName। আপনাকে সাহায্য করতে পেরে আনন্দিত।"

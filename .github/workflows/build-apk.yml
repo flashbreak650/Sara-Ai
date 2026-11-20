@@ -41,27 +41,28 @@ jobs:
 
       - name: Prepare APK artifact name
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk SARA-v0.3.0-premium-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk SARA-v0.3.1-voice-debug.apk
 
       - name: Upload APK workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SARA-v0.3.0-premium-debug
-          path: SARA-v0.3.0-premium-debug.apk
+          name: SARA-v0.3.1-voice-debug
+          path: SARA-v0.3.1-voice-debug.apk
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.3.0-premium-${{ github.run_number }}
-          name: SARA Premium Identity & Voice (Build #${{ github.run_number }})
+          tag_name: v0.3.1-voice-${{ github.run_number }}
+          name: SARA Natural Female Bengali Voice (Build #${{ github.run_number }})
           body: |
-            SARA Personal AI Assistant — Premium Identity, AI Profile, Home Redesign & Natural Male Voice APK.
-            - Futuristic SARA Brand Identity (`SaraLogo`, volumetric 3D `SaraOrb`, glowing `VoiceWaveform`, gradient & glass buttons)
-            - New AI Assistant Profile Screen (`ProfileScreen`) with animated halo portrait frame, online status, voice persona & quick personalization
-            - Natural Adult Male Bengali Voice Engine (`SaraVoiceEngine`) supporting Gemini Cloud Neural Male (`Charon`) + honest On-Device TTS fallback
-            - Upgraded 10-Module Glassmorphic Settings Screen (`SettingsScreen`) & Redesigned Home Screen (`HomeScreen`)
+            SARA Personal AI Assistant — Natural Human Female Bengali Voice Upgrade APK.
+            - Upgraded Voice System to Gemini 3.8 Neural TTS (`gemini-3.8-flash-tts` with `gemini-3.8-flash-lite-tts` fallback)
+            - Natural, warm, sweet human female Bengali personas: `Kore` (Sweet, Warm & Caring) and `Zephyr` (Soft, Gentle & Calm) with live voice preview
+            - Natural Bengali & English pronunciation with breathing pauses and smooth intonation
+            - Smart Android Native TTS fallback ranking high-quality `bn-BD` / `bn-IN` network & neural female voices
+            - All existing UI, colors, buttons, layouts, AI Profile, and 10-Module Settings preserved intact
             - Package: `com.sara.assistant`
-          files: SARA-v0.3.0-premium-debug.apk
+          files: SARA-v0.3.1-voice-debug.apk
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

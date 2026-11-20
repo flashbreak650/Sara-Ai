@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.sara.assistant.data.settings.AnswerLength
 import com.sara.assistant.data.settings.AssistantPersonalityMode
+import com.sara.assistant.data.settings.FemaleVoicePersona
 import com.sara.assistant.data.settings.SaraSettings
 import com.sara.assistant.data.settings.SaraSettingsRepository
 import com.sara.assistant.data.settings.VoiceProviderMode
@@ -284,12 +285,17 @@ fun ProfileScreen(
                     SettingsCategoryCard(
                         icon = Icons.Rounded.RecordVoiceOver,
                         titleBn = "কণ্ঠের ব্যক্তিত্ব · Voice Persona",
-                        subtitleEn = "Warm Adult Male Bengali Profile"
+                        subtitleEn = "Natural Female Bengali Profile (${settings.femaleVoicePersona.voiceId})"
                     ) {
                         ProfileKeyValueRow(
                             label = "ভয়েস ইঞ্জিন · Engine",
                             value = settings.voiceProvider.labelEn,
                             highlight = true
+                        )
+                        HorizontalDivider(color = colors.border)
+                        ProfileKeyValueRow(
+                            label = "নারী কণ্ঠ · Persona",
+                            value = settings.femaleVoicePersona.labelEn
                         )
                         HorizontalDivider(color = colors.border)
                         ProfileKeyValueRow(
@@ -307,7 +313,7 @@ fun ProfileScreen(
                             value = "${String.format("%.2fx", settings.speechSpeed)} · ${(settings.voiceVolume * 100).toInt()}%"
                         )
 
-                        if (voiceStatus.honestMaleLimitationNote != null &&
+                        if (voiceStatus.honestQualityNote != null &&
                             settings.voiceProvider == VoiceProviderMode.ANDROID_NATIVE_TTS
                         ) {
                             Spacer(modifier = Modifier.height(10.dp))
@@ -317,7 +323,7 @@ fun ProfileScreen(
                                 border = BorderStroke(1.dp, StatusAmber.copy(alpha = 0.45f))
                             ) {
                                 Text(
-                                    text = voiceStatus.honestMaleLimitationNote,
+                                    text = voiceStatus.honestQualityNote,
                                     style = MaterialTheme.typography.bodySmall.copy(color = StatusAmber),
                                     modifier = Modifier.padding(12.dp)
                                 )
@@ -398,7 +404,7 @@ fun ProfileScreen(
                             titleBn = "ভয়েস প্রোভাইডার",
                             subtitleEn = "Voice Source",
                             options = listOf(
-                                VoiceProviderMode.CLOUD_NEURAL_MALE to "ক্লাউড পুরুষ কণ্ঠ",
+                                VoiceProviderMode.CLOUD_NEURAL_FEMALE to "ক্লাউড নারী কণ্ঠ",
                                 VoiceProviderMode.ANDROID_NATIVE_TTS to "ডিভাইস TTS"
                             ),
                             selected = settings.voiceProvider,

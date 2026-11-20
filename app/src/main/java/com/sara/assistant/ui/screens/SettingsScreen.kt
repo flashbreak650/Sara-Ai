@@ -75,6 +75,7 @@ import com.sara.assistant.data.settings.ApiConnectionState
 import com.sara.assistant.data.settings.AssistantPersonalityMode
 import com.sara.assistant.data.settings.BengaliPronunciationQuality
 import com.sara.assistant.data.settings.ConversationEntry
+import com.sara.assistant.data.settings.FemaleVoicePersona
 import com.sara.assistant.data.settings.GeminiModelOption
 import com.sara.assistant.data.settings.MemoryItem
 import com.sara.assistant.data.settings.ResponseStyle
@@ -341,12 +342,12 @@ fun SettingsScreen(
                     }
                 }
 
-                // 2. VOICE SETTINGS (NATURAL MALE BENGALI DEFAULT)
+                // 2. VOICE SETTINGS (NATURAL HUMAN FEMALE BENGALI DEFAULT)
                 item {
                     SettingsCategoryCard(
                         icon = Icons.Rounded.RecordVoiceOver,
-                        titleBn = "২. স্বাভাবিক বাংলা পুরুষ কণ্ঠ ও ভয়েস",
-                        subtitleEn = "Natural Male Bengali Voice & TTS"
+                        titleBn = "২. স্বাভাবিক বাংলা নারী কণ্ঠ ও ভয়েস",
+                        subtitleEn = "Natural Female Bengali Voice & TTS"
                     ) {
                         SettingsSwitchRow(
                             titleBn = "ভয়েস উত্তর চালু রাখুন",
@@ -368,16 +369,16 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.height(4.dp))
 
                         VoiceProviderCard(
-                            titleBn = VoiceProviderMode.CLOUD_NEURAL_MALE.labelBn,
-                            titleEn = VoiceProviderMode.CLOUD_NEURAL_MALE.labelEn,
-                            descriptionBn = VoiceProviderMode.CLOUD_NEURAL_MALE.descriptionBn,
+                            titleBn = VoiceProviderMode.CLOUD_NEURAL_FEMALE.labelBn,
+                            titleEn = VoiceProviderMode.CLOUD_NEURAL_FEMALE.labelEn,
+                            descriptionBn = VoiceProviderMode.CLOUD_NEURAL_FEMALE.descriptionBn,
                             badge = "প্রস্তাবিত",
-                            selected = settings.voiceProvider == VoiceProviderMode.CLOUD_NEURAL_MALE,
+                            selected = settings.voiceProvider == VoiceProviderMode.CLOUD_NEURAL_FEMALE,
                             onClick = {
                                 repository.updateSettings {
                                     it.copy(
-                                        voiceProvider = VoiceProviderMode.CLOUD_NEURAL_MALE,
-                                        voiceGender = VoiceGenderPreference.MALE
+                                        voiceProvider = VoiceProviderMode.CLOUD_NEURAL_FEMALE,
+                                        voiceGender = VoiceGenderPreference.FEMALE
                                     )
                                 }
                             }
@@ -387,7 +388,11 @@ fun SettingsScreen(
                             titleBn = VoiceProviderMode.ANDROID_NATIVE_TTS.labelBn,
                             titleEn = VoiceProviderMode.ANDROID_NATIVE_TTS.labelEn,
                             descriptionBn = VoiceProviderMode.ANDROID_NATIVE_TTS.descriptionBn,
-                            badge = if (voiceStatus.maleVoiceAvailable) "Male Found" else "Offline",
+                            badge = when {
+                                voiceStatus.neuralNativeFemaleAvailable -> "Neural"
+                                voiceStatus.femaleVoiceAvailable -> "Female Found"
+                                else -> "Offline"
+                            },
                             selected = settings.voiceProvider == VoiceProviderMode.ANDROID_NATIVE_TTS,
                             onClick = {
                                 repository.updateSettings {
@@ -396,7 +401,7 @@ fun SettingsScreen(
                             }
                         )
 
-                        if (voiceStatus.honestMaleLimitationNote != null) {
+                        if (voiceStatus.honestQualityNote != null) {
                             Spacer(modifier = Modifier.height(6.dp))
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
@@ -404,7 +409,7 @@ fun SettingsScreen(
                                 border = BorderStroke(1.dp, StatusAmber.copy(alpha = 0.45f))
                             ) {
                                 Text(
-                                    text = voiceStatus.honestMaleLimitationNote,
+                                    text = voiceStatus.honestQualityNote,
                                     style = MaterialTheme.typography.bodySmall.copy(color = StatusAmber),
                                     modifier = Modifier.padding(12.dp)
                                 )
@@ -414,9 +419,46 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.height(6.dp))
                         EditableInfoRow(
                             titleBn = "ক্লাউড নিউরাল TTS এন্ডপয়েন্ট · Cloud TTS URL",
-                            value = settings.cloudTtsEndpointUrl.ifBlank { "Set backend /api/tts URL for natural male Charon voice" },
+                            value = settings.cloudTtsEndpointUrl.ifBlank { "Set backend /api/tts URL or save Gemini API Key" },
                             onEdit = { showCloudTtsDialog = true }
                         )
+                        HorizontalDivider(color = colors.border)
+
+                        SettingsDropdownRow(
+                            titleBn = "নারী কণ্ঠের ধরন (পার্সোনা)",
+                            subtitleEn = "Female Voice Persona (${settings.femaleVoicePersona.voiceId})",
+                            selectedLabel = settings.femaleVoicePersona.labelEn,
+                            options = FemaleVoicePersona.entries.map { it to "${it.labelBn} · ${it.labelEn}" },
+                            onSelect = { persona ->
+                                repository.updateSettings {
+                                    it.copy(
+                                        femaleVoicePersona = persona,
+                                        voiceGender = VoiceGenderPreference.FEMALE
+                                    )
+                                }
+                            }
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FemaleVoicePersona.entries.forEach { persona ->
+                                SaraGlassButton(
+                                    text = "প্রিভিউ ${persona.voiceId}",
+                                    icon = Icons.Rounded.VolumeUp,
+                                    onClick = {
+                                        voiceFeedback = "কণ্ঠ প্রিভিউ চলছে (${persona.voiceId})..."
+                                        voiceEngine.previewPersona(persona, settings) { result ->
+                                            voiceFeedback = "${result.providerUsed}: ${result.message}"
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
                         HorizontalDivider(color = colors.border)
 
                         SettingsSegmentedRow(
@@ -431,17 +473,17 @@ fun SettingsScreen(
 
                         SettingsDropdownRow(
                             titleBn = "কণ্ঠের পছন্দ",
-                            subtitleEn = "Default: Warm Adult Male",
+                            subtitleEn = "Default: Natural Female",
                             selectedLabel = "${settings.voiceGender.labelBn} (${settings.voiceGender.labelEn})",
                             options = VoiceGenderPreference.entries.map { pref ->
                                 val statusSuffix = when (pref) {
-                                    VoiceGenderPreference.MALE ->
-                                        if (settings.voiceProvider == VoiceProviderMode.CLOUD_NEURAL_MALE || voiceStatus.maleVoiceAvailable) {
+                                    VoiceGenderPreference.FEMALE ->
+                                        if (settings.voiceProvider == VoiceProviderMode.CLOUD_NEURAL_FEMALE || voiceStatus.femaleVoiceAvailable) {
                                             ""
                                         } else {
                                             " · Cloud Recommended"
                                         }
-                                    VoiceGenderPreference.FEMALE -> ""
+                                    VoiceGenderPreference.MALE -> ""
                                     VoiceGenderPreference.SYSTEM_DEFAULT -> ""
                                 }
                                 pref to "${pref.labelBn} · ${pref.labelEn}$statusSuffix"
@@ -1324,7 +1366,7 @@ fun SettingsScreen(
     if (showHelpDialog) {
         InfoModalDialog(
             title = "সাহায্য ও সাপোর্ট · Help & Support",
-            body = "• সত্যিকারের প্রাকৃতিক বাংলা পুরুষ কণ্ঠের (Charon) জন্য Voice Settings-এ Cloud Neural TTS URL সেট করুন।\n• অফলাইন Android TTS ব্যবহার করলে ফোনের ইনস্টলকৃত বাংলা ভয়েস প্যাক ব্যবহৃত হয় (ফোনে পুরুষ কণ্ঠ না থাকলে তা স্পষ্ট জানানো হয়)।\n• Accessibility ও Notification Access Android সিস্টেম সেটিংস থেকে চালু করতে হয়।",
+            body = "• সত্যিকারের মিষ্টি, স্বাভাবিক ও মানবিক বাংলা নারী কণ্ঠের (Kore / Zephyr) জন্য Voice Settings-এ Cloud Neural TTS URL বা Gemini API Key সেট করুন।\n• অফলাইন Android TTS ব্যবহার করলে ফোনের সর্বোচ্চ মানের বাংলা নারী ভয়েস প্যাক ব্যবহৃত হয়।\n• Accessibility ও Notification Access Android সিস্টেম সেটিংস থেকে চালু করতে হয়।",
             onDismiss = { showHelpDialog = false }
         )
     }
