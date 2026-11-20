@@ -36,19 +36,19 @@ import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -73,6 +73,7 @@ import com.sara.assistant.data.settings.AccentColorOption
 import com.sara.assistant.data.settings.AnswerLength
 import com.sara.assistant.data.settings.ApiConnectionState
 import com.sara.assistant.data.settings.AssistantPersonalityMode
+import com.sara.assistant.data.settings.BengaliPronunciationQuality
 import com.sara.assistant.data.settings.ConversationEntry
 import com.sara.assistant.data.settings.GeminiModelOption
 import com.sara.assistant.data.settings.MemoryItem
@@ -83,21 +84,28 @@ import com.sara.assistant.data.settings.TextSizeOption
 import com.sara.assistant.data.settings.ThemeModeOption
 import com.sara.assistant.data.settings.VoiceGenderPreference
 import com.sara.assistant.data.settings.VoiceLanguageOption
+import com.sara.assistant.data.settings.VoiceProviderMode
 import com.sara.assistant.system.AndroidPermissionHelper
 import com.sara.assistant.system.GeminiConnectionChecker
 import com.sara.assistant.system.SaraVoiceEngine
 import com.sara.assistant.system.SaraWakeService
 import com.sara.assistant.system.VoiceEngineStatus
 import com.sara.assistant.ui.components.PermissionTone
+import com.sara.assistant.ui.components.SaraAvatarFrame
+import com.sara.assistant.ui.components.SaraGlassButton
+import com.sara.assistant.ui.components.SaraIconGlowButton
 import com.sara.assistant.ui.components.SaraOrb
 import com.sara.assistant.ui.components.SaraOrbState
+import com.sara.assistant.ui.components.SaraPrimaryGradientButton
 import com.sara.assistant.ui.components.SettingsCategoryCard
 import com.sara.assistant.ui.components.SettingsDropdownRow
 import com.sara.assistant.ui.components.SettingsPermissionRow
 import com.sara.assistant.ui.components.SettingsSegmentedRow
 import com.sara.assistant.ui.components.SettingsSliderRow
 import com.sara.assistant.ui.components.SettingsSwitchRow
+import com.sara.assistant.ui.components.VoiceProviderCard
 import com.sara.assistant.ui.theme.LocalSaraColors
+import com.sara.assistant.ui.theme.StatusAmber
 import com.sara.assistant.ui.theme.StatusDanger
 import com.sara.assistant.ui.theme.StatusNominal
 import kotlinx.coroutines.launch
@@ -107,8 +115,9 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * Complete 10-Category SARA Settings Screen.
- * Every control persists real state and integrates directly with Android APIs.
+ * Upgraded Premium 10-Category SARA Settings Screen.
+ * Adds Natural Male Bengali Voice selection cards, Profile shortcut, glassmorphic cards,
+ * and gradient tactile buttons across every functional setting.
  */
 @Composable
 fun SettingsScreen(
@@ -117,9 +126,11 @@ fun SettingsScreen(
     conversationHistory: List<ConversationEntry>,
     voiceStatus: VoiceEngineStatus,
     wakeServiceRunning: Boolean,
+    isSpeaking: Boolean,
     repository: SaraSettingsRepository,
     voiceEngine: SaraVoiceEngine,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenProfile: () -> Unit
 ) {
     val context = LocalContext.current
     val colors = LocalSaraColors.current
@@ -128,7 +139,6 @@ fun SettingsScreen(
     var permissionSnapshot by remember { mutableStateOf(AndroidPermissionHelper.captureSnapshot(context)) }
     val refreshPermissions = { permissionSnapshot = AndroidPermissionHelper.captureSnapshot(context) }
 
-    // Real runtime permission launchers
     val micPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -154,9 +164,10 @@ fun SettingsScreen(
         ActivityResultContracts.StartActivityForResult()
     ) { refreshPermissions() }
 
-    // Dialog states
     var showNameDialog by remember { mutableStateOf(false) }
+    var showSubtitleDialog by remember { mutableStateOf(false) }
     var showPersonalityDialog by remember { mutableStateOf(false) }
+    var showCloudTtsDialog by remember { mutableStateOf(false) }
     var showWakeWordDialog by remember { mutableStateOf(false) }
     var showApiConfigDialog by remember { mutableStateOf(false) }
     var showAddMemoryDialog by remember { mutableStateOf(false) }
@@ -167,15 +178,7 @@ fun SettingsScreen(
 
     var voiceFeedback by remember { mutableStateOf<String?>(null) }
     var wakeFeedback by remember { mutableStateOf<String?>(null) }
-    var apiConnectionState by remember {
-        mutableStateOf(
-            if (settings.hasStoredApiKey || settings.apiProxyUrl.isNotBlank()) {
-                ApiConnectionState.UNCONFIGURED
-            } else {
-                ApiConnectionState.UNCONFIGURED
-            }
-        )
-    }
+    var apiConnectionState by remember { mutableStateOf(ApiConnectionState.UNCONFIGURED) }
     var apiStatusMessage by remember {
         mutableStateOf(
             if (settings.hasStoredApiKey || settings.apiProxyUrl.isNotBlank()) {
@@ -202,22 +205,18 @@ fun SettingsScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .background(colors.surface.copy(alpha = 0.90f))
                     .border(BorderStroke(1.dp, colors.border))
-                    .background(colors.surface.copy(alpha = 0.92f))
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
+                SaraIconGlowButton(
+                    icon = Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = "Back to Home",
                     onClick = onBack,
-                    modifier = Modifier.size(44.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back to Home",
-                        tint = colors.accentPrimary
-                    )
-                }
-                Spacer(modifier = Modifier.width(6.dp))
+                    size = 42.dp
+                )
+                Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "সারা সেটিংস",
@@ -227,10 +226,15 @@ fun SettingsScreen(
                         )
                     )
                     Text(
-                        text = "SARA Control Center · 10 Modules",
+                        text = "SARA Control Center · Premium Settings",
                         style = MaterialTheme.typography.labelMedium.copy(color = colors.textSecondary)
                     )
                 }
+                SaraGlassButton(
+                    text = "প্রোফাইল",
+                    icon = Icons.Rounded.Person,
+                    onClick = onOpenProfile
+                )
             }
 
             LazyColumn(
@@ -238,17 +242,67 @@ fun SettingsScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // PROFILE CUSTOMIZATION BANNER
+                item {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        color = colors.surface.copy(alpha = 0.92f),
+                        border = BorderStroke(1.dp, colors.accentPrimary.copy(alpha = 0.32f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SaraAvatarFrame(
+                                size = 64.dp,
+                                animationsEnabled = settings.animationsEnabled,
+                                showOnlineBadge = true,
+                                onClick = onOpenProfile
+                            )
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = settings.assistantName.ifBlank { "SARA" },
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        color = colors.textPrimary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                                Text(
+                                    text = settings.assistantSubtitle.ifBlank { "Your Personal AI" },
+                                    style = MaterialTheme.typography.labelMedium.copy(color = colors.accentPrimary)
+                                )
+                                Text(
+                                    text = "Voice: ${settings.voiceGender.labelEn}",
+                                    style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary)
+                                )
+                            }
+                            SaraGlassButton(
+                                text = "প্রোফাইল",
+                                onClick = onOpenProfile
+                            )
+                        }
+                    }
+                }
+
                 // 1. AI PERSONALITY
                 item {
                     SettingsCategoryCard(
                         icon = Icons.Rounded.AutoAwesome,
-                        titleBn = "১. এআই ব্যক্তিত্ব",
-                        subtitleEn = "AI Personality"
+                        titleBn = "১. এআই ব্যক্তিত্ব ও পরিচয়",
+                        subtitleEn = "AI Identity & Personality"
                     ) {
                         EditableInfoRow(
                             titleBn = "সহকারীর নাম · Assistant Name",
                             value = settings.assistantName,
                             onEdit = { showNameDialog = true }
+                        )
+                        HorizontalDivider(color = colors.border)
+                        EditableInfoRow(
+                            titleBn = "পরিচয় সাবটাইটেল · Subtitle",
+                            value = settings.assistantSubtitle,
+                            onEdit = { showSubtitleDialog = true }
                         )
                         HorizontalDivider(color = colors.border)
                         EditableInfoRow(
@@ -287,12 +341,12 @@ fun SettingsScreen(
                     }
                 }
 
-                // 2. VOICE SETTINGS
+                // 2. VOICE SETTINGS (NATURAL MALE BENGALI DEFAULT)
                 item {
                     SettingsCategoryCard(
                         icon = Icons.Rounded.RecordVoiceOver,
-                        titleBn = "২. ভয়েস সেটিংস",
-                        subtitleEn = "Voice & Text-to-Speech"
+                        titleBn = "২. স্বাভাবিক বাংলা পুরুষ কণ্ঠ ও ভয়েস",
+                        subtitleEn = "Natural Male Bengali Voice & TTS"
                     ) {
                         SettingsSwitchRow(
                             titleBn = "ভয়েস উত্তর চালু রাখুন",
@@ -302,6 +356,69 @@ fun SettingsScreen(
                                 repository.updateSettings { it.copy(voiceResponsesEnabled = enabled) }
                             }
                         )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "ভয়েস সোর্স নির্বাচন · Voice Engine",
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                color = colors.textPrimary,
+                                fontWeight = FontWeight.Medium
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        VoiceProviderCard(
+                            titleBn = VoiceProviderMode.CLOUD_NEURAL_MALE.labelBn,
+                            titleEn = VoiceProviderMode.CLOUD_NEURAL_MALE.labelEn,
+                            descriptionBn = VoiceProviderMode.CLOUD_NEURAL_MALE.descriptionBn,
+                            badge = "প্রস্তাবিত",
+                            selected = settings.voiceProvider == VoiceProviderMode.CLOUD_NEURAL_MALE,
+                            onClick = {
+                                repository.updateSettings {
+                                    it.copy(
+                                        voiceProvider = VoiceProviderMode.CLOUD_NEURAL_MALE,
+                                        voiceGender = VoiceGenderPreference.MALE
+                                    )
+                                }
+                            }
+                        )
+
+                        VoiceProviderCard(
+                            titleBn = VoiceProviderMode.ANDROID_NATIVE_TTS.labelBn,
+                            titleEn = VoiceProviderMode.ANDROID_NATIVE_TTS.labelEn,
+                            descriptionBn = VoiceProviderMode.ANDROID_NATIVE_TTS.descriptionBn,
+                            badge = if (voiceStatus.maleVoiceAvailable) "Male Found" else "Offline",
+                            selected = settings.voiceProvider == VoiceProviderMode.ANDROID_NATIVE_TTS,
+                            onClick = {
+                                repository.updateSettings {
+                                    it.copy(voiceProvider = VoiceProviderMode.ANDROID_NATIVE_TTS)
+                                }
+                            }
+                        )
+
+                        if (voiceStatus.honestMaleLimitationNote != null) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = StatusAmber.copy(alpha = 0.12f),
+                                border = BorderStroke(1.dp, StatusAmber.copy(alpha = 0.45f))
+                            ) {
+                                Text(
+                                    text = voiceStatus.honestMaleLimitationNote,
+                                    style = MaterialTheme.typography.bodySmall.copy(color = StatusAmber),
+                                    modifier = Modifier.padding(12.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        EditableInfoRow(
+                            titleBn = "ক্লাউড নিউরাল TTS এন্ডপয়েন্ট · Cloud TTS URL",
+                            value = settings.cloudTtsEndpointUrl.ifBlank { "Set backend /api/tts URL for natural male Charon voice" },
+                            onEdit = { showCloudTtsDialog = true }
+                        )
+                        HorizontalDivider(color = colors.border)
+
                         SettingsSegmentedRow(
                             titleBn = "ভয়েসের ভাষা",
                             subtitleEn = "Voice language: Bengali or English",
@@ -311,45 +428,57 @@ fun SettingsScreen(
                                 repository.updateSettings { it.copy(voiceLanguage = lang) }
                             }
                         )
+
                         SettingsDropdownRow(
-                            titleBn = "কণ্ঠ নির্বাচন",
-                            subtitleEn = buildString {
-                                append("Female / Male voice")
-                                if (voiceStatus.initialized && !voiceStatus.femaleVoiceAvailable && !voiceStatus.maleVoiceAvailable) {
-                                    append(" (Device TTS uses system default)")
-                                }
-                            },
+                            titleBn = "কণ্ঠের পছন্দ",
+                            subtitleEn = "Default: Warm Adult Male",
                             selectedLabel = "${settings.voiceGender.labelBn} (${settings.voiceGender.labelEn})",
                             options = VoiceGenderPreference.entries.map { pref ->
-                                val availability = when (pref) {
-                                    VoiceGenderPreference.FEMALE ->
-                                        if (voiceStatus.femaleVoiceAvailable) "" else " · Unavailable on TTS"
+                                val statusSuffix = when (pref) {
                                     VoiceGenderPreference.MALE ->
-                                        if (voiceStatus.maleVoiceAvailable) "" else " · Unavailable on TTS"
+                                        if (settings.voiceProvider == VoiceProviderMode.CLOUD_NEURAL_MALE || voiceStatus.maleVoiceAvailable) {
+                                            ""
+                                        } else {
+                                            " · Cloud Recommended"
+                                        }
+                                    VoiceGenderPreference.FEMALE -> ""
                                     VoiceGenderPreference.SYSTEM_DEFAULT -> ""
                                 }
-                                pref to "${pref.labelBn} · ${pref.labelEn}$availability"
+                                pref to "${pref.labelBn} · ${pref.labelEn}$statusSuffix"
                             },
                             onSelect = { gender ->
                                 repository.updateSettings { it.copy(voiceGender = gender) }
                             }
                         )
+
+                        SettingsSegmentedRow(
+                            titleBn = "বাংলা উচ্চারণ ও বিরতি",
+                            subtitleEn = "Bengali Pronunciation & Human Pauses",
+                            options = BengaliPronunciationQuality.entries.map {
+                                it to if (it == BengaliPronunciationQuality.NATURAL_HUMAN) "প্রাকৃতিক · Natural" else "দ্রুত · Standard"
+                            },
+                            selected = settings.bengaliPronunciationQuality,
+                            onSelect = { q ->
+                                repository.updateSettings { it.copy(bengaliPronunciationQuality = q) }
+                            }
+                        )
+
                         SettingsSliderRow(
                             titleBn = "কথার গতি",
                             subtitleEn = "Speech speed",
                             valueLabel = String.format(Locale.US, "%.2fx", settings.speechSpeed),
                             value = settings.speechSpeed,
-                            valueRange = 0.5f..2.0f,
+                            valueRange = 0.6f..1.8f,
                             onValueChange = { v ->
                                 repository.updateSettings { it.copy(speechSpeed = v) }
                             }
                         )
                         SettingsSliderRow(
-                            titleBn = "কণ্ঠের পিচ",
+                            titleBn = "কণ্ঠের পিচ (ডিভাইস TTS)",
                             subtitleEn = "Speech pitch",
                             valueLabel = String.format(Locale.US, "%.2fx", settings.speechPitch),
                             value = settings.speechPitch,
-                            valueRange = 0.5f..2.0f,
+                            valueRange = 0.75f..1.4f,
                             onValueChange = { v ->
                                 repository.updateSettings { it.copy(speechPitch = v) }
                             }
@@ -365,35 +494,40 @@ fun SettingsScreen(
                             }
                         )
 
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Button(
-                            onClick = {
-                                if (!voiceStatus.initialized) {
-                                    voiceFeedback = voiceStatus.unavailableMessage
-                                        ?: "TTS engine is not ready on this device."
-                                } else {
-                                    val ok = voiceEngine.speakTest(settings)
-                                    voiceFeedback = if (ok) {
-                                        "টেস্ট ভয়েস চালু হয়েছে (${settings.voiceLanguage.labelEn})"
-                                    } else {
-                                        "ভয়েস প্লেব্যাক ব্যর্থ হয়েছে (TTS unavailable)"
-                                    }
-                                }
-                            },
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = colors.accentPrimary,
-                                contentColor = colors.canvas
-                            )
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text("ভয়েস পরীক্ষা করুন · Test Voice")
+                            SaraPrimaryGradientButton(
+                                text = if (isSpeaking) "চলছে..." else "ভয়েস পরীক্ষা করুন · Test Voice",
+                                icon = Icons.Rounded.VolumeUp,
+                                onClick = {
+                                    voiceFeedback = if (settings.voiceLanguage == VoiceLanguageOption.BENGALI) {
+                                        "কণ্ঠ প্রস্তুত হচ্ছে..."
+                                    } else {
+                                        "Preparing voice..."
+                                    }
+                                    voiceEngine.speakTest(settings) { result ->
+                                        voiceFeedback = "${result.providerUsed}: ${result.message}"
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (isSpeaking) {
+                                SaraGlassButton(
+                                    text = "থামান",
+                                    icon = Icons.Rounded.Stop,
+                                    onClick = { voiceEngine.stopPlayback() }
+                                )
+                            }
                         }
+
                         if (voiceFeedback != null) {
                             Text(
                                 text = voiceFeedback.orEmpty(),
-                                style = MaterialTheme.typography.bodyMedium.copy(color = colors.accentPrimary),
-                                modifier = Modifier.padding(top = 6.dp)
+                                style = MaterialTheme.typography.bodySmall.copy(color = colors.accentPrimary),
+                                modifier = Modifier.padding(top = 8.dp)
                             )
                         }
                     }
@@ -494,12 +628,19 @@ fun SettingsScreen(
                                     style = MaterialTheme.typography.bodyMedium.copy(color = colors.textSecondary)
                                 )
                             }
-                            Button(
-                                onClick = {
-                                    if (wakeServiceRunning) {
+                            if (wakeServiceRunning) {
+                                SaraGlassButton(
+                                    text = "Stop",
+                                    tint = StatusDanger,
+                                    onClick = {
                                         SaraWakeService.stop(context)
                                         wakeFeedback = "ব্যাকগ্রাউন্ড লিসেনিং বন্ধ করা হয়েছে।"
-                                    } else {
+                                    }
+                                )
+                            } else {
+                                SaraPrimaryGradientButton(
+                                    text = "Start Listening",
+                                    onClick = {
                                         if (!permissionSnapshot.microphoneGranted) {
                                             micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                             wakeFeedback = "সার্ভিস চালু করতে মাইক্রোফোন অনুমতি দিন।"
@@ -513,14 +654,7 @@ fun SettingsScreen(
                                             }
                                         }
                                     }
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (wakeServiceRunning) StatusDanger else colors.accentPrimary,
-                                    contentColor = if (wakeServiceRunning) Color.White else colors.canvas
                                 )
-                            ) {
-                                Text(if (wakeServiceRunning) "Stop" else "Start Listening")
                             }
                         }
                         if (wakeFeedback != null) {
@@ -742,15 +876,11 @@ fun SettingsScreen(
                                     fontWeight = FontWeight.Medium
                                 )
                             )
-                            TextButton(
-                                onClick = { showAddMemoryDialog = true },
-                                enabled = settings.memoryEnabled
-                            ) {
-                                Text(
-                                    text = "+ Add Note",
-                                    color = if (settings.memoryEnabled) colors.accentPrimary else colors.textMuted
-                                )
-                            }
+                            SaraGlassButton(
+                                text = "+ Add Note",
+                                enabled = settings.memoryEnabled,
+                                onClick = { showAddMemoryDialog = true }
+                            )
                         }
 
                         if (memories.isEmpty()) {
@@ -770,18 +900,13 @@ fun SettingsScreen(
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedButton(
-                            onClick = { showClearHistoryConfirm = true },
+                        SaraGlassButton(
+                            text = "কথোপকথনের ইতিহাস মুছুন · Clear History (${conversationHistory.size})",
                             enabled = conversationHistory.isNotEmpty(),
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, colors.border)
-                        ) {
-                            Text(
-                                text = "কথোপকথনের ইতিহাস মুছুন · Clear History (${conversationHistory.size})",
-                                color = if (conversationHistory.isNotEmpty()) StatusDanger else colors.textMuted
-                            )
-                        }
+                            tint = StatusDanger,
+                            onClick = { showClearHistoryConfirm = true },
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
 
@@ -789,20 +914,19 @@ fun SettingsScreen(
                 item {
                     SettingsCategoryCard(
                         icon = Icons.Rounded.Palette,
-                        titleBn = "৭. অ্যাপিয়ারেন্স",
+                        titleBn = "৭. অ্যাপিয়ারেন্স ও ডিজাইন",
                         subtitleEn = "Theme, Accent Color, Animations & Text Size"
                     ) {
                         SettingsSegmentedRow(
                             titleBn = "থিম মোড",
                             subtitleEn = "Dark, Light, or System Default",
-                            options = ThemeModeOption.entries.map { it to it.labelBn },
+                            options = ThemeModeOption.entries.map { it to "${it.labelBn} · ${it.labelEn}" },
                             selected = settings.themeMode,
                             onSelect = { mode ->
                                 repository.updateSettings { it.copy(themeMode = mode) }
                             }
                         )
 
-                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "অ্যাকসেন্ট রঙ · Accent Color",
                             style = MaterialTheme.typography.bodyLarge.copy(
@@ -821,12 +945,12 @@ fun SettingsScreen(
                                 Column(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .clip(RoundedCornerShape(12.dp))
+                                        .clip(RoundedCornerShape(14.dp))
                                         .background(if (selected) swatchColor.copy(alpha = 0.16f) else colors.canvas)
                                         .border(
                                             width = if (selected) 1.5.dp else 1.dp,
                                             color = if (selected) swatchColor else colors.border,
-                                            shape = RoundedCornerShape(12.dp)
+                                            shape = RoundedCornerShape(14.dp)
                                         )
                                         .clickable {
                                             repository.updateSettings { it.copy(accentColor = accent) }
@@ -982,17 +1106,12 @@ fun SettingsScreen(
                             }
                         )
                         Spacer(modifier = Modifier.height(6.dp))
-                        OutlinedButton(
+                        SaraGlassButton(
+                            text = "সমস্ত ব্যক্তিগত ডেটা মুছুন · Clear Personal Data",
+                            tint = StatusDanger,
                             onClick = { showClearAllConfirm = true },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, StatusDanger.copy(alpha = 0.5f))
-                        ) {
-                            Text(
-                                text = "সমস্ত ব্যক্তিগত ডেটা মুছুন · Clear Personal Data",
-                                color = StatusDanger
-                            )
-                        }
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
 
@@ -1018,7 +1137,7 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.width(14.dp))
                             Column {
                                 Text(
-                                    text = "${settings.assistantName} — Personal AI Assistant",
+                                    text = "${settings.assistantName} — ${settings.assistantSubtitle}",
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         color = colors.textPrimary,
                                         fontWeight = FontWeight.Bold
@@ -1036,27 +1155,21 @@ fun SettingsScreen(
                         }
 
                         HorizontalDivider(color = colors.border)
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            OutlinedButton(
+                            SaraGlassButton(
+                                text = "প্রাইভেসি পলিসি",
                                 onClick = { showPrivacyPolicyDialog = true },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, colors.border)
-                            ) {
-                                Text("প্রাইভেসি পলিসি", color = colors.textPrimary)
-                            }
-                            OutlinedButton(
+                                modifier = Modifier.weight(1f)
+                            )
+                            SaraGlassButton(
+                                text = "সাহায্য ও সাপোর্ট",
                                 onClick = { showHelpDialog = true },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, colors.border)
-                            ) {
-                                Text("সাহায্য ও সাপোর্ট", color = colors.textPrimary)
-                            }
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                     }
                 }
@@ -1078,6 +1191,19 @@ fun SettingsScreen(
         )
     }
 
+    if (showSubtitleDialog) {
+        TextEditDialog(
+            title = "সাবটাইটেল · Assistant Subtitle",
+            initialValue = settings.assistantSubtitle,
+            label = "Subtitle (e.g. Your Personal AI)",
+            onDismiss = { showSubtitleDialog = false },
+            onSave = { value ->
+                repository.updateSettings { it.copy(assistantSubtitle = value.ifBlank { "Your Personal AI" }) }
+                showSubtitleDialog = false
+            }
+        )
+    }
+
     if (showPersonalityDialog) {
         TextEditDialog(
             title = "ব্যক্তিত্বের বিবরণ · Personality",
@@ -1089,6 +1215,24 @@ fun SettingsScreen(
                     it.copy(personalityDescription = value.ifBlank { it.personalityDescription })
                 }
                 showPersonalityDialog = false
+            }
+        )
+    }
+
+    if (showCloudTtsDialog) {
+        TextEditDialog(
+            title = "Cloud Neural TTS URL",
+            initialValue = settings.cloudTtsEndpointUrl,
+            label = "Backend /api/tts HTTPS URL",
+            onDismiss = { showCloudTtsDialog = false },
+            onSave = { value ->
+                repository.updateSettings { it.copy(cloudTtsEndpointUrl = value.trim()) }
+                voiceFeedback = if (value.isBlank()) {
+                    "Cloud TTS URL পরিষ্কার করা হয়েছে।"
+                } else {
+                    "Cloud TTS URL সংরক্ষিত হয়েছে।"
+                }
+                showCloudTtsDialog = false
             }
         )
     }
@@ -1180,7 +1324,7 @@ fun SettingsScreen(
     if (showHelpDialog) {
         InfoModalDialog(
             title = "সাহায্য ও সাপোর্ট · Help & Support",
-            body = "• ভয়েস চালু করতে Voice Settings থেকে 'Test Voice' চাপুন এবং Wake Word থেকে Microphone অনুমতি দিন।\n• Accessibility ও Notification Access Android-এর সিস্টেম সেটিংস থেকে ম্যানুয়ালি চালু করতে হয়।\n• নিরাপদ ব্যবহারের জন্য AI Brain সেটিংসে নিজস্ব ব্যাকএন্ড প্রক্সি বা Keystore কী ব্যবহার করুন।",
+            body = "• সত্যিকারের প্রাকৃতিক বাংলা পুরুষ কণ্ঠের (Charon) জন্য Voice Settings-এ Cloud Neural TTS URL সেট করুন।\n• অফলাইন Android TTS ব্যবহার করলে ফোনের ইনস্টলকৃত বাংলা ভয়েস প্যাক ব্যবহৃত হয় (ফোনে পুরুষ কণ্ঠ না থাকলে তা স্পষ্ট জানানো হয়)।\n• Accessibility ও Notification Access Android সিস্টেম সেটিংস থেকে চালু করতে হয়।",
             onDismiss = { showHelpDialog = false }
         )
     }

@@ -21,19 +21,28 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.rounded.AddCircleOutline
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,19 +51,31 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.sara.assistant.data.settings.ConversationEntry
+import com.sara.assistant.data.settings.MemoryItem
 import com.sara.assistant.data.settings.SaraSettings
 import com.sara.assistant.data.settings.VoiceLanguageOption
+import com.sara.assistant.ui.components.SaraAvatarFrame
+import com.sara.assistant.ui.components.SaraGlassButton
+import com.sara.assistant.ui.components.SaraIconGlowButton
+import com.sara.assistant.ui.components.SaraLogo
 import com.sara.assistant.ui.components.SaraOrb
 import com.sara.assistant.ui.components.SaraOrbState
+import com.sara.assistant.ui.components.VoiceWaveform
 import com.sara.assistant.ui.theme.LocalSaraColors
-import com.sara.assistant.ui.theme.StatusNominal
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 enum class AppLanguage {
     BENGALI,
@@ -62,18 +83,23 @@ enum class AppLanguage {
 }
 
 /**
- * SARA Main Home Screen.
- * Preserves Step 1 visual identity, animated Orb, bilingual greeting, and bottom composer
- * while integrating live Settings state and Settings screen navigation.
+ * Redesigned SARA Premium Futuristic Home Screen.
+ * Combines 3D-style animated AI Orb, glowing voice waveform, AI portrait navigation,
+ * quick actions, real conversation history, and floating glass composer.
  */
 @Composable
 fun HomeScreen(
     settings: SaraSettings,
-    memoryCount: Int,
-    conversationCount: Int,
+    memories: List<MemoryItem>,
+    conversationHistory: List<ConversationEntry>,
+    isSpeaking: Boolean,
+    wakeServiceRunning: Boolean,
+    onOpenProfile: () -> Unit,
     onOpenSettings: () -> Unit,
     onOrbSpeak: (String) -> Unit,
-    onSubmitMessage: (String) -> Unit
+    onStopSpeaking: () -> Unit,
+    onSubmitMessage: (String) -> Unit,
+    onAddMemory: (String) -> Unit
 ) {
     val colors = LocalSaraColors.current
     var language by remember(settings.voiceLanguage) {
@@ -84,14 +110,12 @@ fun HomeScreen(
     var orbState by remember { mutableStateOf(SaraOrbState.IDLE) }
     var draftMessage by remember { mutableStateOf("") }
     var feedbackNote by remember { mutableStateOf<String?>(null) }
+    var showQuickMemoryDialog by remember { mutableStateOf(false) }
 
     val assistantName = settings.assistantName.ifBlank { "SARA" }
-    val greeting = remember(language) { resolveTimeGreeting(language) }
-    val subtitle = if (language == AppLanguage.BENGALI) {
-        "আমি $assistantName, আপনার ব্যক্তিগত এআই সহকারী"
-    } else {
-        "I am $assistantName, your personal AI assistant"
-    }
+    val assistantSubtitle = settings.assistantSubtitle.ifBlank { "Your Personal AI" }
+    val timeGreeting = remember(language) { resolveTimeGreeting(language) }
+    val effectiveOrbState = if (isSpeaking) SaraOrbState.SPEAKING else orbState
 
     Box(
         modifier = Modifier
@@ -108,40 +132,62 @@ fun HomeScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 20.dp, vertical = 14.dp),
+                .padding(horizontal = 18.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Bar: Brand Identity + Language Switch + Settings Icon
+            // Top Brand & Navigation Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = assistantName.uppercase(),
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = colors.textPrimary
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(colors.surface.copy(alpha = 0.8f))
+                        .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+                        .clickable(onClick = onOpenProfile)
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SaraAvatarFrame(
+                        size = 38.dp,
+                        animationsEnabled = settings.animationsEnabled,
+                        showOnlineBadge = true
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            SaraLogo(size = 16.dp)
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = assistantName.uppercase(),
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = colors.textPrimary
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Text(
+                            text = assistantSubtitle,
+                            style = MaterialTheme.typography.labelSmall.copy(color = colors.accentPrimary),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
-                    )
-                    Text(
-                        text = if (language == AppLanguage.BENGALI) {
-                            "${settings.personalityMode.labelBn} · ${settings.selectedModel.title}"
-                        } else {
-                            "${settings.personalityMode.labelEn} · ${settings.selectedModel.title}"
-                        },
-                        style = MaterialTheme.typography.labelMedium.copy(color = colors.textSecondary)
-                    )
+                    }
                 }
 
+                Spacer(modifier = Modifier.width(8.dp))
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Interactive Bilingual Segmented Control
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(colors.surface)
-                            .border(1.dp, colors.border, RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(colors.surface.copy(alpha = 0.9f))
+                            .border(1.dp, colors.border, RoundedCornerShape(12.dp))
                             .padding(3.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -159,236 +205,478 @@ fun HomeScreen(
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    // Settings Navigation Button
-                    IconButton(
+                    SaraIconGlowButton(
+                        icon = Icons.Rounded.Settings,
+                        contentDescription = "Open Settings",
                         onClick = onOpenSettings,
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(colors.surface)
-                            .border(1.dp, colors.border, RoundedCornerShape(12.dp))
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Settings,
-                            contentDescription = "Open Settings",
-                            tint = colors.accentPrimary,
-                            modifier = Modifier.size(21.dp)
-                        )
-                    }
+                        size = 44.dp
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(26.dp))
-
-            // Time-Aware Bilingual Greeting
-            Text(
-                text = greeting,
-                style = MaterialTheme.typography.displaySmall.copy(color = colors.textPrimary),
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyLarge.copy(color = colors.textSecondary),
-                textAlign = TextAlign.Center
-            )
-
-            // Center Focal Anchor: Animated SARA Orb
-            Box(
+            // Scrollable Futuristic Center Workspace
+            Column(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    SaraOrb(
-                        state = orbState,
-                        animationsEnabled = settings.animationsEnabled,
-                        onTap = {
-                            orbState = when (orbState) {
-                                SaraOrbState.IDLE -> SaraOrbState.ACTIVE_GREETING
-                                SaraOrbState.ACTIVE_GREETING -> SaraOrbState.LISTENING_READY
-                                SaraOrbState.LISTENING_READY -> SaraOrbState.IDLE
-                            }
-                            val msg = if (language == AppLanguage.BENGALI) {
-                                "$assistantName প্রস্তুত। ভয়েস, মেমোরি ও সেটিংস সক্রিয় রয়েছে।"
-                            } else {
-                                "$assistantName is ready. Voice, memory & settings are active."
-                            }
-                            feedbackNote = msg
-                            onOrbSpeak(msg)
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Text(
+                    text = timeGreeting,
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        color = colors.accentPrimary,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = if (language == AppLanguage.BENGALI) {
+                        "আসসালামু আলাইকুম! আমি $assistantName। আপনাকে কীভাবে সাহায্য করতে পারি?"
+                    } else {
+                        "Assalamu Alaikum! I am $assistantName. How can I assist you today?"
+                    },
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        color = colors.textPrimary,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 6.dp)
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // 3D Volumetric AI Orb
+                SaraOrb(
+                    state = effectiveOrbState,
+                    orbSize = 196.dp,
+                    animationsEnabled = settings.animationsEnabled,
+                    onTap = {
+                        if (isSpeaking) {
+                            onStopSpeaking()
+                            orbState = SaraOrbState.IDLE
+                            return@SaraOrb
                         }
+                        orbState = when (orbState) {
+                            SaraOrbState.IDLE -> SaraOrbState.ACTIVE_GREETING
+                            SaraOrbState.ACTIVE_GREETING -> SaraOrbState.LISTENING
+                            SaraOrbState.LISTENING, SaraOrbState.SPEAKING -> SaraOrbState.IDLE
+                        }
+                        val spoken = if (language == AppLanguage.BENGALI) {
+                            "আসসালামু আলাইকুম! আমি $assistantName। আপনার ভয়েস, মেমোরি ও সেটিংস প্রস্তুত রয়েছে।"
+                        } else {
+                            "Hello! I am $assistantName. Voice, memory and AI controls are active."
+                        }
+                        feedbackNote = spoken
+                        onOrbSpeak(spoken)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Glowing Live Voice Waveform
+                VoiceWaveform(
+                    state = effectiveOrbState,
+                    animationsEnabled = settings.animationsEnabled
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = when (effectiveOrbState) {
+                        SaraOrbState.SPEAKING -> if (language == AppLanguage.BENGALI) "উত্তর শোনানো হচ্ছে..." else "Speaking with natural voice..."
+                        SaraOrbState.LISTENING -> if (language == AppLanguage.BENGALI) "শোনার জন্য প্রস্তুত" else "Listening mode active"
+                        SaraOrbState.ACTIVE_GREETING -> if (language == AppLanguage.BENGALI) "অভ্যর্থনা মোড সক্রিয়" else "Greeting mode active"
+                        SaraOrbState.IDLE -> if (language == AppLanguage.BENGALI) "অর্ব ট্যাপ করে কথা বলুন" else "Tap the orb to interact"
+                    },
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = colors.accentPrimary,
+                        fontWeight = FontWeight.SemiBold
                     )
+                )
 
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Text(
-                        text = when (orbState) {
-                            SaraOrbState.IDLE -> if (language == AppLanguage.BENGALI) "ট্যাপ করে পরীক্ষা করুন" else "Tap orb to interact"
-                            SaraOrbState.ACTIVE_GREETING -> if (language == AppLanguage.BENGALI) "অভ্যর্থনা মোড সক্রিয়" else "Greeting state active"
-                            SaraOrbState.LISTENING_READY -> if (language == AppLanguage.BENGALI) "ভয়েস UI প্রস্তুত" else "Voice UI ready"
-                        },
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            color = colors.accentPrimary
-                        )
+                if (isSpeaking) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    SaraGlassButton(
+                        text = if (language == AppLanguage.BENGALI) "ভয়েস থামান" else "Stop Speaking",
+                        icon = Icons.Rounded.Stop,
+                        onClick = onStopSpeaking
                     )
+                }
 
-                    AnimatedVisibility(
-                        visible = feedbackNote != null,
-                        enter = fadeIn(),
-                        exit = fadeOut()
+                AnimatedVisibility(
+                    visible = feedbackNote != null,
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = colors.surface.copy(alpha = 0.84f),
+                        border = BorderStroke(1.dp, colors.accentPrimary.copy(alpha = 0.28f))
                     ) {
                         Text(
                             text = feedbackNote.orEmpty(),
-                            style = MaterialTheme.typography.bodyMedium.copy(color = colors.textSecondary),
+                            style = MaterialTheme.typography.bodyMedium.copy(color = colors.textPrimary),
                             textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(top = 10.dp, start = 16.dp, end = 16.dp)
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                         )
                     }
                 }
-            }
 
-            // Live Foundation & Settings Status Strip
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = colors.surface,
-                border = BorderStroke(1.dp, colors.border)
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    FoundationRow(
-                        title = if (language == AppLanguage.BENGALI) {
-                            "ভয়েস ও সেটিংস সিস্টেম"
-                        } else {
-                            "Voice & Settings System"
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Quick Action Cards Grid (2 x 2)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    QuickActionCard(
+                        icon = Icons.Rounded.RecordVoiceOver,
+                        title = if (language == AppLanguage.BENGALI) "ভয়েস পরীক্ষা" else "Test Voice",
+                        subtitle = if (language == AppLanguage.BENGALI) "স্বাভাবিক পুরুষ কণ্ঠ" else "Natural male voice",
+                        onClick = {
+                            val sample = if (language == AppLanguage.BENGALI) {
+                                "আসসালামু আলাইকুম! আমি $assistantName। আপনাকে সাহায্য করতে পেরে আনন্দিত।"
+                            } else {
+                                "Hello! I am $assistantName, ready to help you."
+                            }
+                            feedbackNote = sample
+                            onOrbSpeak(sample)
                         },
-                        status = if (settings.voiceResponsesEnabled) {
-                            if (language == AppLanguage.BENGALI) "সক্রিয়" else "Active"
-                        } else {
-                            if (language == AppLanguage.BENGALI) "নীরব" else "Muted"
-                        },
-                        active = settings.voiceResponsesEnabled
+                        modifier = Modifier.weight(1f)
                     )
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        color = colors.border
-                    )
-                    FoundationRow(
-                        title = if (language == AppLanguage.BENGALI) {
-                            "মেমোরি ($memoryCount) · বার্তা ($conversationCount)"
+                    QuickActionCard(
+                        icon = Icons.Rounded.AddCircleOutline,
+                        title = if (language == AppLanguage.BENGALI) "মেমোরি সেভ (${memories.size})" else "Save Note (${memories.size})",
+                        subtitle = if (settings.memoryEnabled) {
+                            if (language == AppLanguage.BENGALI) "মেমোরি সক্রিয়" else "Memory active"
                         } else {
-                            "Memories ($memoryCount) · History ($conversationCount)"
+                            if (language == AppLanguage.BENGALI) "সেটিংস থেকে চালু করুন" else "Enable in Settings"
                         },
-                        status = if (settings.memoryEnabled) {
-                            if (language == AppLanguage.BENGALI) "সংরক্ষণ চালু" else "Memory On"
-                        } else {
-                            if (language == AppLanguage.BENGALI) "বন্ধ" else "Paused"
+                        onClick = {
+                            if (settings.memoryEnabled) {
+                                showQuickMemoryDialog = true
+                            } else {
+                                onOpenSettings()
+                            }
                         },
-                        active = settings.memoryEnabled
+                        modifier = Modifier.weight(1f)
                     )
                 }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    QuickActionCard(
+                        icon = Icons.Rounded.Person,
+                        title = if (language == AppLanguage.BENGALI) "এআই প্রোফাইল" else "AI Profile",
+                        subtitle = "$assistantName · ${settings.selectedModel.title.replace("Gemini ", "G")}",
+                        onClick = onOpenProfile,
+                        modifier = Modifier.weight(1f)
+                    )
+                    QuickActionCard(
+                        icon = Icons.Rounded.GraphicEq,
+                        title = if (language == AppLanguage.BENGALI) "ওয়েক ওয়ার্ড" else "Wake Word",
+                        subtitle = if (wakeServiceRunning) {
+                            "${settings.customWakeWord} · Active"
+                        } else {
+                            if (language == AppLanguage.BENGALI) "সেটিংস থেকে চালু করুন" else "Tap to configure"
+                        },
+                        onClick = onOpenSettings,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Recent Conversations Card (Real Saved History Only)
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    color = colors.surface.copy(alpha = 0.88f),
+                    border = BorderStroke(1.dp, colors.border)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (language == AppLanguage.BENGALI) "সাম্প্রতিক কথোপকথন" else "Recent Conversations",
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    color = colors.textPrimary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            )
+                            Text(
+                                text = "${conversationHistory.size} ${if (language == AppLanguage.BENGALI) "টি" else "items"}",
+                                style = MaterialTheme.typography.labelMedium.copy(color = colors.accentPrimary)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        if (conversationHistory.isEmpty()) {
+                            Text(
+                                text = if (language == AppLanguage.BENGALI) {
+                                    "এখনো কোনো কথোপকথন সংরক্ষিত নেই। নিচে লিখুন অথবা অর্ব ট্যাপ করুন।"
+                                } else {
+                                    "No saved messages yet. Type below or tap the orb to begin."
+                                },
+                                style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary)
+                            )
+                        } else {
+                            conversationHistory.take(4).forEachIndexed { index, entry ->
+                                val timeStr = remember(entry.timestampMillis) {
+                                    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(entry.timestampMillis))
+                                }
+                                if (index > 0) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(vertical = 8.dp),
+                                        color = colors.border.copy(alpha = 0.7f)
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    Text(
+                                        text = entry.message,
+                                        style = MaterialTheme.typography.bodyMedium.copy(color = colors.textPrimary),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = timeStr,
+                                        style = MaterialTheme.typography.labelSmall.copy(color = colors.textMuted)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Bottom Composer Bar (Text Input + Mic Button + Send)
-            Row(
+            // Floating Glass Composer Dock
+            Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(colors.elevated)
-                    .border(1.dp, colors.border, RoundedCornerShape(20.dp))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .shadow(
+                        elevation = 14.dp,
+                        shape = RoundedCornerShape(24.dp),
+                        ambientColor = colors.accentPrimary.copy(alpha = 0.35f),
+                        spotColor = colors.accentPrimary.copy(alpha = 0.35f)
+                    ),
+                shape = RoundedCornerShape(24.dp),
+                color = colors.elevated.copy(alpha = 0.94f),
+                border = BorderStroke(1.dp, colors.accentPrimary.copy(alpha = 0.32f))
             ) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 6.dp, vertical = 8.dp)
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (draftMessage.isEmpty()) {
-                        Text(
-                            text = if (language == AppLanguage.BENGALI) {
-                                "${assistantName}-কে কিছু লিখুন..."
-                            } else {
-                                "Message $assistantName..."
-                            },
-                            style = MaterialTheme.typography.bodyLarge.copy(color = colors.textMuted)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp, vertical = 9.dp)
+                    ) {
+                        if (draftMessage.isEmpty()) {
+                            Text(
+                                text = if (language == AppLanguage.BENGALI) {
+                                    "${assistantName}-কে আপনার কথা লিখুন..."
+                                } else {
+                                    "Ask $assistantName anything..."
+                                },
+                                style = MaterialTheme.typography.bodyMedium.copy(color = colors.textMuted)
+                            )
+                        }
+                        BasicTextField(
+                            value = draftMessage,
+                            onValueChange = { draftMessage = it },
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.textPrimary),
+                            cursorBrush = SolidColor(colors.accentPrimary),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
-                    BasicTextField(
-                        value = draftMessage,
-                        onValueChange = { draftMessage = it },
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.textPrimary),
-                        cursorBrush = SolidColor(colors.accentPrimary),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
 
-                IconButton(
-                    onClick = {
-                        orbState = SaraOrbState.LISTENING_READY
-                        feedbackNote = if (settings.wakeWordEnabled) {
-                            if (language == AppLanguage.BENGALI) {
-                                "\"${settings.customWakeWord}\" সক্রিয়। সেটিংস থেকে ভয়েস ও মাইক নিয়ন্ত্রণ করুন।"
-                            } else {
-                                "\"${settings.customWakeWord}\" active. Manage microphone & voice in Settings."
-                            }
-                        } else {
-                            if (language == AppLanguage.BENGALI) {
-                                "সেটিংস > ওয়েক ওয়ার্ড থেকে মাইক্রোফোন অনুমতি দিন।"
-                            } else {
-                                "Grant Microphone access in Settings > Wake Word."
-                            }
-                        }
-                    },
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(colors.accentPrimary.copy(alpha = 0.14f))
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Mic,
+                    SaraIconGlowButton(
+                        icon = Icons.Rounded.Mic,
                         contentDescription = "Voice Input",
-                        tint = colors.accentPrimary
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(6.dp))
-
-                IconButton(
-                    onClick = {
-                        if (draftMessage.isNotBlank()) {
-                            val captured = draftMessage.trim()
-                            draftMessage = ""
-                            orbState = SaraOrbState.ACTIVE_GREETING
-                            onSubmitMessage(captured)
-                            feedbackNote = if (language == AppLanguage.BENGALI) {
-                                "\"$captured\" হিস্টোরিতে সংরক্ষিত হয়েছে।"
+                        highlighted = effectiveOrbState == SaraOrbState.LISTENING,
+                        onClick = {
+                            orbState = SaraOrbState.LISTENING
+                            feedbackNote = if (settings.wakeWordEnabled) {
+                                if (language == AppLanguage.BENGALI) {
+                                    "\"${settings.customWakeWord}\" লিসেনিং মোড সক্রিয়।"
+                                } else {
+                                    "\"${settings.customWakeWord}\" listening mode ready."
+                                }
                             } else {
-                                "\"$captured\" saved to conversation history."
+                                if (language == AppLanguage.BENGALI) {
+                                    "মাইক্রোফোন ও ওয়েক ওয়ার্ড চালু করতে সেটিংসে যান।"
+                                } else {
+                                    "Enable Microphone access in Settings > Wake Word."
+                                }
                             }
-                        } else {
-                            feedbackNote = if (language == AppLanguage.BENGALI) {
-                                "প্রথমে একটি বার্তা লিখুন।"
-                            } else {
-                                "Type a message first."
-                            }
-                        }
-                    },
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(colors.accentPrimary)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.Send,
-                        contentDescription = "Send Message",
-                        tint = colors.canvas
+                        },
+                        size = 44.dp
                     )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(colors.accentPrimary, colors.accentSecondary)
+                                )
+                            )
+                            .clickable {
+                                if (draftMessage.isNotBlank()) {
+                                    val captured = draftMessage.trim()
+                                    draftMessage = ""
+                                    orbState = SaraOrbState.ACTIVE_GREETING
+                                    onSubmitMessage(captured)
+                                    feedbackNote = if (language == AppLanguage.BENGALI) {
+                                        "\"$captured\" সংরক্ষিত হয়েছে।"
+                                    } else {
+                                        "\"$captured\" saved to conversation history."
+                                    }
+                                } else {
+                                    feedbackNote = if (language == AppLanguage.BENGALI) {
+                                        "প্রথমে একটি বার্তা লিখুন।"
+                                    } else {
+                                        "Type a message first."
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.Send,
+                            contentDescription = "Send Message",
+                            tint = Color(0xFF060B18),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
+        }
+    }
+
+    if (showQuickMemoryDialog) {
+        var noteText by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showQuickMemoryDialog = false },
+            title = { Text(if (language == AppLanguage.BENGALI) "নতুন মেমোরি যোগ করুন" else "Save Memory Note") },
+            text = {
+                OutlinedTextField(
+                    value = noteText,
+                    onValueChange = { noteText = it },
+                    label = { Text(if (language == AppLanguage.BENGALI) "তথ্য বা পছন্দ লিখুন" else "Fact or preference") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (noteText.isNotBlank()) {
+                            onAddMemory(noteText)
+                            feedbackNote = if (language == AppLanguage.BENGALI) {
+                                "নতুন মেমোরি সংরক্ষিত হয়েছে।"
+                            } else {
+                                "Memory note saved."
+                            }
+                        }
+                        showQuickMemoryDialog = false
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showQuickMemoryDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun QuickActionCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalSaraColors.current
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        color = colors.surface.copy(alpha = 0.88f),
+        border = BorderStroke(1.dp, colors.border)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                colors.accentPrimary.copy(alpha = 0.22f),
+                                colors.accentSecondary.copy(alpha = 0.16f)
+                            )
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = colors.accentPrimary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelLarge.copy(
+                    color = colors.textPrimary,
+                    fontWeight = FontWeight.SemiBold
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall.copy(color = colors.textSecondary),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -402,42 +690,28 @@ private fun LanguageTab(
     val colors = LocalSaraColors.current
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) colors.accentPrimary.copy(alpha = 0.18f) else Color.Transparent)
+            .clip(RoundedCornerShape(9.dp))
+            .background(
+                if (selected) {
+                    Brush.linearGradient(
+                        listOf(
+                            colors.accentPrimary.copy(alpha = 0.24f),
+                            colors.accentSecondary.copy(alpha = 0.18f)
+                        )
+                    )
+                } else {
+                    Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                }
+            )
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelMedium.copy(
                 color = if (selected) colors.accentPrimary else colors.textSecondary,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
-            )
-        )
-    }
-}
-
-@Composable
-private fun FoundationRow(
-    title: String,
-    status: String,
-    active: Boolean
-) {
-    val colors = LocalSaraColors.current
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.bodyMedium.copy(color = colors.textPrimary)
-        )
-        Text(
-            text = status,
-            style = MaterialTheme.typography.labelMedium.copy(
-                color = if (active) StatusNominal else colors.accentSecondary
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
             )
         )
     }

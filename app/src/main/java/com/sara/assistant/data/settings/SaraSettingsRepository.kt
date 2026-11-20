@@ -9,8 +9,7 @@ import org.json.JSONObject
 import java.util.UUID
 
 /**
- * Single source of truth for persisted SARA preferences, saved memories, and conversation logs.
- * Backed by private SharedPreferences + reactive StateFlows.
+ * Single source of truth for persisted SARA preferences, assistant profile, memories, and conversations.
  */
 class SaraSettingsRepository(context: Context) {
 
@@ -66,13 +65,14 @@ class SaraSettingsRepository(context: Context) {
         persistMemories(next)
     }
 
-    fun recordConversationMessage(text: String) {
+    fun recordConversationMessage(text: String, isAssistant: Boolean = false) {
         val clean = text.trim()
         if (clean.isEmpty()) return
         val entry = ConversationEntry(
             id = UUID.randomUUID().toString(),
             message = clean,
-            timestampMillis = System.currentTimeMillis()
+            timestampMillis = System.currentTimeMillis(),
+            isAssistant = isAssistant
         )
         val next = (listOf(entry) + _conversationHistory.value).take(50)
         _conversationHistory.value = next
@@ -92,13 +92,16 @@ class SaraSettingsRepository(context: Context) {
             .remove(KEY_MEMORIES)
             .remove(KEY_CONVERSATIONS)
             .remove(KEY_API_PROXY_URL)
+            .remove(KEY_CLOUD_TTS_URL)
             .apply()
 
         updateSettings {
             it.copy(
                 assistantName = "SARA",
+                assistantSubtitle = "Your Personal AI",
                 customWakeWord = "Hey SARA",
                 apiProxyUrl = "",
+                cloudTtsEndpointUrl = "",
                 hasStoredApiKey = false
             )
         }
@@ -108,6 +111,8 @@ class SaraSettingsRepository(context: Context) {
         val defaults = SaraSettings()
         return SaraSettings(
             assistantName = prefs.getString(KEY_ASSISTANT_NAME, defaults.assistantName) ?: defaults.assistantName,
+            assistantSubtitle = prefs.getString(KEY_ASSISTANT_SUBTITLE, defaults.assistantSubtitle)
+                ?: defaults.assistantSubtitle,
             personalityDescription = prefs.getString(KEY_PERSONALITY_DESC, defaults.personalityDescription)
                 ?: defaults.personalityDescription,
             personalityMode = enumOrDefault(prefs.getString(KEY_PERSONALITY_MODE, null), defaults.personalityMode),
@@ -115,11 +120,18 @@ class SaraSettingsRepository(context: Context) {
             answerLength = enumOrDefault(prefs.getString(KEY_ANSWER_LENGTH, null), defaults.answerLength),
 
             voiceResponsesEnabled = prefs.getBoolean(KEY_VOICE_ENABLED, defaults.voiceResponsesEnabled),
+            voiceProvider = enumOrDefault(prefs.getString(KEY_VOICE_PROVIDER, null), defaults.voiceProvider),
             voiceGender = enumOrDefault(prefs.getString(KEY_VOICE_GENDER, null), defaults.voiceGender),
             speechSpeed = prefs.getFloat(KEY_SPEECH_SPEED, defaults.speechSpeed).coerceIn(0.5f, 2.0f),
             speechPitch = prefs.getFloat(KEY_SPEECH_PITCH, defaults.speechPitch).coerceIn(0.5f, 2.0f),
             voiceLanguage = enumOrDefault(prefs.getString(KEY_VOICE_LANGUAGE, null), defaults.voiceLanguage),
             voiceVolume = prefs.getFloat(KEY_VOICE_VOLUME, defaults.voiceVolume).coerceIn(0.0f, 1.0f),
+            bengaliPronunciationQuality = enumOrDefault(
+                prefs.getString(KEY_BN_PRONUNCIATION, null),
+                defaults.bengaliPronunciationQuality
+            ),
+            cloudTtsEndpointUrl = prefs.getString(KEY_CLOUD_TTS_URL, defaults.cloudTtsEndpointUrl)
+                ?: defaults.cloudTtsEndpointUrl,
 
             wakeWordEnabled = prefs.getBoolean(KEY_WAKE_WORD_ENABLED, defaults.wakeWordEnabled),
             customWakeWord = prefs.getString(KEY_CUSTOM_WAKE_WORD, defaults.customWakeWord)
@@ -156,17 +168,21 @@ class SaraSettingsRepository(context: Context) {
     private fun persistSettings(s: SaraSettings) {
         prefs.edit()
             .putString(KEY_ASSISTANT_NAME, s.assistantName.ifBlank { "SARA" })
+            .putString(KEY_ASSISTANT_SUBTITLE, s.assistantSubtitle.ifBlank { "Your Personal AI" })
             .putString(KEY_PERSONALITY_DESC, s.personalityDescription)
             .putString(KEY_PERSONALITY_MODE, s.personalityMode.name)
             .putString(KEY_RESPONSE_STYLE, s.responseStyle.name)
             .putString(KEY_ANSWER_LENGTH, s.answerLength.name)
 
             .putBoolean(KEY_VOICE_ENABLED, s.voiceResponsesEnabled)
+            .putString(KEY_VOICE_PROVIDER, s.voiceProvider.name)
             .putString(KEY_VOICE_GENDER, s.voiceGender.name)
             .putFloat(KEY_SPEECH_SPEED, s.speechSpeed)
             .putFloat(KEY_SPEECH_PITCH, s.speechPitch)
             .putString(KEY_VOICE_LANGUAGE, s.voiceLanguage.name)
             .putFloat(KEY_VOICE_VOLUME, s.voiceVolume)
+            .putString(KEY_BN_PRONUNCIATION, s.bengaliPronunciationQuality.name)
+            .putString(KEY_CLOUD_TTS_URL, s.cloudTtsEndpointUrl.trim())
 
             .putBoolean(KEY_WAKE_WORD_ENABLED, s.wakeWordEnabled)
             .putString(KEY_CUSTOM_WAKE_WORD, s.customWakeWord.ifBlank { "Hey SARA" })
@@ -241,7 +257,8 @@ class SaraSettingsRepository(context: Context) {
                         ConversationEntry(
                             id = obj.getString("id"),
                             message = obj.getString("message"),
-                            timestampMillis = obj.getLong("timestampMillis")
+                            timestampMillis = obj.getLong("timestampMillis"),
+                            isAssistant = obj.optBoolean("isAssistant", false)
                         )
                     )
                 }
@@ -259,6 +276,7 @@ class SaraSettingsRepository(context: Context) {
                     put("id", item.id)
                     put("message", item.message)
                     put("timestampMillis", item.timestampMillis)
+                    put("isAssistant", item.isAssistant)
                 }
             )
         }
@@ -277,16 +295,20 @@ class SaraSettingsRepository(context: Context) {
     private companion object {
         const val PREFS_NAME = "sara_settings_prefs"
         const val KEY_ASSISTANT_NAME = "assistant_name"
+        const val KEY_ASSISTANT_SUBTITLE = "assistant_subtitle"
         const val KEY_PERSONALITY_DESC = "personality_desc"
         const val KEY_PERSONALITY_MODE = "personality_mode"
         const val KEY_RESPONSE_STYLE = "response_style"
         const val KEY_ANSWER_LENGTH = "answer_length"
         const val KEY_VOICE_ENABLED = "voice_enabled"
+        const val KEY_VOICE_PROVIDER = "voice_provider"
         const val KEY_VOICE_GENDER = "voice_gender"
         const val KEY_SPEECH_SPEED = "speech_speed"
         const val KEY_SPEECH_PITCH = "speech_pitch"
         const val KEY_VOICE_LANGUAGE = "voice_language"
         const val KEY_VOICE_VOLUME = "voice_volume"
+        const val KEY_BN_PRONUNCIATION = "bn_pronunciation"
+        const val KEY_CLOUD_TTS_URL = "cloud_tts_url"
         const val KEY_WAKE_WORD_ENABLED = "wake_word_enabled"
         const val KEY_CUSTOM_WAKE_WORD = "custom_wake_word"
         const val KEY_GEMINI_MODEL = "gemini_model"

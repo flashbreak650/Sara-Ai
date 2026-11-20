@@ -9,13 +9,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -32,13 +33,17 @@ import androidx.compose.ui.unit.dp
 import com.sara.assistant.data.settings.SaraSettingsRepository
 import com.sara.assistant.system.SaraVoiceEngine
 import com.sara.assistant.system.SaraWakeService
+import com.sara.assistant.ui.components.SaraAvatarFrame
+import com.sara.assistant.ui.components.SaraPrimaryGradientButton
 import com.sara.assistant.ui.screens.HomeScreen
+import com.sara.assistant.ui.screens.ProfileScreen
 import com.sara.assistant.ui.screens.SettingsScreen
 import com.sara.assistant.ui.theme.LocalSaraColors
 import com.sara.assistant.ui.theme.SaraTheme
 
 private enum class SaraDestination {
     HOME,
+    PROFILE,
     SETTINGS
 }
 
@@ -59,6 +64,7 @@ class MainActivity : ComponentActivity() {
             val memories by repository.memories.collectAsState()
             val conversationHistory by repository.conversationHistory.collectAsState()
             val voiceStatus by voiceEngine.status.collectAsState()
+            val isSpeaking by voiceEngine.isSpeaking.collectAsState()
             val wakeServiceRunning by SaraWakeService.isRunning.collectAsState()
 
             var destination by remember { mutableStateOf(SaraDestination.HOME) }
@@ -114,36 +120,71 @@ class MainActivity : ComponentActivity() {
                         }
                     )
                 } else {
-                    when (destination) {
-                        SaraDestination.HOME -> {
-                            HomeScreen(
-                                settings = settings,
-                                memoryCount = memories.size,
-                                conversationCount = conversationHistory.size,
-                                onOpenSettings = { destination = SaraDestination.SETTINGS },
-                                onOrbSpeak = { message ->
-                                    voiceEngine.speakIfEnabled(message, settings)
-                                },
-                                onSubmitMessage = { message ->
-                                    repository.recordConversationMessage(message)
-                                }
-                            )
-                        }
-
-                        SaraDestination.SETTINGS -> {
-                            BackHandler {
-                                destination = SaraDestination.HOME
+                    Crossfade(
+                        targetState = destination,
+                        animationSpec = tween(durationMillis = if (settings.animationsEnabled) 260 else 0),
+                        label = "sara_nav_crossfade"
+                    ) { screen ->
+                        when (screen) {
+                            SaraDestination.HOME -> {
+                                HomeScreen(
+                                    settings = settings,
+                                    memories = memories,
+                                    conversationHistory = conversationHistory,
+                                    isSpeaking = isSpeaking,
+                                    wakeServiceRunning = wakeServiceRunning,
+                                    onOpenProfile = { destination = SaraDestination.PROFILE },
+                                    onOpenSettings = { destination = SaraDestination.SETTINGS },
+                                    onOrbSpeak = { message ->
+                                        voiceEngine.speakIfEnabled(message, settings)
+                                    },
+                                    onStopSpeaking = {
+                                        voiceEngine.stopPlayback()
+                                    },
+                                    onSubmitMessage = { message ->
+                                        repository.recordConversationMessage(message)
+                                    },
+                                    onAddMemory = { note ->
+                                        repository.addMemory(note)
+                                    }
+                                )
                             }
-                            SettingsScreen(
-                                settings = settings,
-                                memories = memories,
-                                conversationHistory = conversationHistory,
-                                voiceStatus = voiceStatus,
-                                wakeServiceRunning = wakeServiceRunning,
-                                repository = repository,
-                                voiceEngine = voiceEngine,
-                                onBack = { destination = SaraDestination.HOME }
-                            )
+
+                            SaraDestination.PROFILE -> {
+                                BackHandler {
+                                    destination = SaraDestination.HOME
+                                }
+                                ProfileScreen(
+                                    settings = settings,
+                                    memoryCount = memories.size,
+                                    conversationCount = conversationHistory.size,
+                                    voiceStatus = voiceStatus,
+                                    wakeServiceRunning = wakeServiceRunning,
+                                    isSpeaking = isSpeaking,
+                                    repository = repository,
+                                    voiceEngine = voiceEngine,
+                                    onBack = { destination = SaraDestination.HOME },
+                                    onOpenSettings = { destination = SaraDestination.SETTINGS }
+                                )
+                            }
+
+                            SaraDestination.SETTINGS -> {
+                                BackHandler {
+                                    destination = SaraDestination.HOME
+                                }
+                                SettingsScreen(
+                                    settings = settings,
+                                    memories = memories,
+                                    conversationHistory = conversationHistory,
+                                    voiceStatus = voiceStatus,
+                                    wakeServiceRunning = wakeServiceRunning,
+                                    isSpeaking = isSpeaking,
+                                    repository = repository,
+                                    voiceEngine = voiceEngine,
+                                    onBack = { destination = SaraDestination.HOME },
+                                    onOpenProfile = { destination = SaraDestination.PROFILE }
+                                )
+                            }
                         }
                     }
                 }
@@ -174,6 +215,8 @@ private fun AppLockGateScreen(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            SaraAvatarFrame(size = 96.dp, showOnlineBadge = false)
+            Spacer(modifier = Modifier.height(16.dp))
             Text(
                 text = "$assistantName লক করা আছে",
                 style = MaterialTheme.typography.headlineSmall.copy(color = colors.textPrimary)
@@ -184,9 +227,10 @@ private fun AppLockGateScreen(
                 style = MaterialTheme.typography.bodyMedium.copy(color = colors.textSecondary)
             )
             Spacer(modifier = Modifier.height(20.dp))
-            Button(onClick = onUnlockRequest) {
-                Text("Unlock $assistantName")
-            }
+            SaraPrimaryGradientButton(
+                text = "Unlock $assistantName",
+                onClick = onUnlockRequest
+            )
         }
     }
 }

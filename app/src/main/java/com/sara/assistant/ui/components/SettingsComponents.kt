@@ -19,6 +19,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -30,7 +32,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -59,17 +61,34 @@ fun SettingsCategoryCard(
     val colors = LocalSaraColors.current
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        color = colors.surface,
-        border = BorderStroke(1.dp, colors.border)
+        shape = RoundedCornerShape(20.dp),
+        color = colors.surface.copy(alpha = 0.90f),
+        border = BorderStroke(
+            width = 1.dp,
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    colors.accentPrimary.copy(alpha = 0.34f),
+                    colors.border,
+                    colors.accentSecondary.copy(alpha = 0.24f)
+                )
+            )
+        )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(colors.accentPrimary.copy(alpha = 0.14f)),
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    colors.accentPrimary.copy(alpha = 0.22f),
+                                    colors.accentSecondary.copy(alpha = 0.16f)
+                                )
+                            )
+                        )
+                        .border(1.dp, colors.accentPrimary.copy(alpha = 0.28f), RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -95,9 +114,81 @@ fun SettingsCategoryCard(
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
-            HorizontalDivider(color = colors.border)
+            HorizontalDivider(color = colors.border.copy(alpha = 0.8f))
             Spacer(modifier = Modifier.height(6.dp))
             content()
+        }
+    }
+}
+
+@Composable
+fun VoiceProviderCard(
+    titleBn: String,
+    titleEn: String,
+    descriptionBn: String,
+    badge: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = LocalSaraColors.current
+    val borderBrush = if (selected) {
+        Brush.linearGradient(listOf(colors.accentPrimary, colors.accentSecondary))
+    } else {
+        Brush.linearGradient(listOf(colors.border, colors.border))
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        color = if (selected) colors.elevated.copy(alpha = 0.92f) else colors.canvas.copy(alpha = 0.72f),
+        border = BorderStroke(if (selected) 1.5.dp else 1.dp, borderBrush)
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                contentDescription = null,
+                tint = if (selected) colors.accentPrimary else colors.textMuted,
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = titleBn,
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    )
+                    Text(
+                        text = badge,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = if (selected) colors.accentPrimary else colors.textSecondary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                }
+                Text(
+                    text = titleEn,
+                    style = MaterialTheme.typography.labelMedium.copy(color = colors.accentPrimary)
+                )
+                Spacer(modifier = Modifier.height(3.dp))
+                Text(
+                    text = descriptionBn,
+                    style = MaterialTheme.typography.bodySmall.copy(color = colors.textSecondary)
+                )
+            }
         }
     }
 }
@@ -140,7 +231,7 @@ fun SettingsSwitchRow(
             enabled = enabled,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = colors.canvas,
+                checkedThumbColor = Color(0xFF060B18),
                 checkedTrackColor = colors.accentPrimary,
                 uncheckedThumbColor = colors.textSecondary,
                 uncheckedTrackColor = colors.elevated,
@@ -183,13 +274,20 @@ fun SettingsSliderRow(
                     style = MaterialTheme.typography.bodyMedium.copy(color = colors.textSecondary)
                 )
             }
-            Text(
-                text = valueLabel,
-                style = MaterialTheme.typography.labelMedium.copy(
-                    color = colors.accentPrimary,
-                    fontWeight = FontWeight.SemiBold
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(colors.accentPrimary.copy(alpha = 0.14f))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = valueLabel,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = colors.accentPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
                 )
-            )
+            }
         }
         Slider(
             value = value,
@@ -243,16 +341,19 @@ fun <T> SettingsDropdownRow(
         Box {
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(colors.elevated)
-                    .border(1.dp, colors.border, RoundedCornerShape(10.dp))
+                    .border(1.dp, colors.accentPrimary.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
                     .clickable { expanded = true }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = selectedLabel,
-                    style = MaterialTheme.typography.labelMedium.copy(color = colors.textPrimary)
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = colors.textPrimary,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Icon(
@@ -316,9 +417,9 @@ fun <T> SettingsSegmentedRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(colors.canvas)
-                .border(1.dp, colors.border, RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(14.dp))
+                .background(colors.canvas.copy(alpha = 0.85f))
+                .border(1.dp, colors.border, RoundedCornerShape(14.dp))
                 .padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
@@ -327,10 +428,23 @@ fun <T> SettingsSegmentedRow(
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(10.dp))
                         .background(
-                            if (isSelected) colors.accentPrimary.copy(alpha = 0.18f)
-                            else Color.Transparent
+                            if (isSelected) {
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        colors.accentPrimary.copy(alpha = 0.24f),
+                                        colors.accentSecondary.copy(alpha = 0.18f)
+                                    )
+                                )
+                            } else {
+                                Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
+                            }
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (isSelected) colors.accentPrimary.copy(alpha = 0.45f) else Color.Transparent,
+                            shape = RoundedCornerShape(10.dp)
                         )
                         .clickable { onSelect(option) }
                         .padding(vertical = 9.dp, horizontal = 6.dp),
@@ -340,7 +454,7 @@ fun <T> SettingsSegmentedRow(
                         text = label,
                         style = MaterialTheme.typography.labelMedium.copy(
                             color = if (isSelected) colors.accentPrimary else colors.textSecondary,
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                         )
                     )
                 }
@@ -410,20 +524,9 @@ fun SettingsPermissionRow(
             }
         }
 
-        TextButton(
-            onClick = onAction,
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(colors.elevated)
-                .border(1.dp, colors.border, RoundedCornerShape(10.dp))
-        ) {
-            Text(
-                text = actionLabel,
-                style = MaterialTheme.typography.labelMedium.copy(
-                    color = colors.accentPrimary,
-                    fontWeight = FontWeight.SemiBold
-                )
-            )
-        }
+        SaraGlassButton(
+            text = actionLabel,
+            onClick = onAction
+        )
     }
 }

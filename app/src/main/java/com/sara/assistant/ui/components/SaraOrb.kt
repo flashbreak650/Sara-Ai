@@ -32,24 +32,26 @@ import com.sara.assistant.ui.theme.LocalSaraColors
 enum class SaraOrbState {
     IDLE,
     ACTIVE_GREETING,
-    LISTENING_READY
+    LISTENING,
+    SPEAKING
 }
 
 /**
- * Futuristic animated SARA AI Orb rendered cleanly via Jetpack Compose Canvas.
- * Respects user Accent Color and Animations preference from Settings.
+ * Large 3D-style futuristic SARA AI Orb with multi-axis orbital arcs,
+ * volumetric specular core, and reactive listening / speaking pulses.
  */
 @Composable
 fun SaraOrb(
     state: SaraOrbState,
     onTap: () -> Unit,
     modifier: Modifier = Modifier,
-    orbSize: Dp = 216.dp,
+    orbSize: Dp = 224.dp,
     animationsEnabled: Boolean = true
 ) {
     val colors = LocalSaraColors.current
     val primaryGlow = colors.accentPrimary
     val secondaryGlow = colors.accentSecondary
+    val electricBlue = Color(0xFF38BDF8)
 
     val infiniteTransition = rememberInfiniteTransition(label = "sara_orb_loop")
 
@@ -57,7 +59,14 @@ fun SaraOrb(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 14000, easing = LinearEasing),
+            animation = tween(
+                durationMillis = when (state) {
+                    SaraOrbState.SPEAKING -> 5500
+                    SaraOrbState.LISTENING -> 7500
+                    else -> 14000
+                },
+                easing = LinearEasing
+            ),
             repeatMode = RepeatMode.Restart
         ),
         label = "outer_ring_rotation"
@@ -67,17 +76,27 @@ fun SaraOrb(
         initialValue = 360f,
         targetValue = 0f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 9000, easing = LinearEasing),
+            animation = tween(
+                durationMillis = when (state) {
+                    SaraOrbState.SPEAKING -> 4200
+                    SaraOrbState.LISTENING -> 5800
+                    else -> 9000
+                },
+                easing = LinearEasing
+            ),
             repeatMode = RepeatMode.Restart
         ),
         label = "inner_ring_rotation"
     )
 
     val breatheAnimated by infiniteTransition.animateFloat(
-        initialValue = 0.94f,
-        targetValue = 1.06f,
+        initialValue = if (state == SaraOrbState.SPEAKING) 0.90f else 0.95f,
+        targetValue = if (state == SaraOrbState.SPEAKING) 1.11f else 1.05f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2800, easing = FastOutSlowInEasing),
+            animation = tween(
+                durationMillis = if (state == SaraOrbState.SPEAKING) 620 else 2600,
+                easing = FastOutSlowInEasing
+            ),
             repeatMode = RepeatMode.Reverse
         ),
         label = "core_breathe"
@@ -90,10 +109,11 @@ fun SaraOrb(
     val stateScale by animateFloatAsState(
         targetValue = when (state) {
             SaraOrbState.IDLE -> 1.0f
-            SaraOrbState.ACTIVE_GREETING -> 1.08f
-            SaraOrbState.LISTENING_READY -> 1.12f
+            SaraOrbState.ACTIVE_GREETING -> 1.06f
+            SaraOrbState.LISTENING -> 1.11f
+            SaraOrbState.SPEAKING -> 1.14f
         },
-        animationSpec = tween(durationMillis = if (animationsEnabled) 320 else 0, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = if (animationsEnabled) 280 else 0, easing = FastOutSlowInEasing),
         label = "state_scale"
     )
 
@@ -111,89 +131,105 @@ fun SaraOrb(
     ) {
         Canvas(modifier = Modifier.size(orbSize)) {
             val center = Offset(size.width / 2f, size.height / 2f)
-            val baseRadius = size.minDimension * 0.28f * breathe * stateScale
+            val baseRadius = size.minDimension * 0.27f * breathe * stateScale
 
-            // 1. Ambient outer radial aura
+            // 1. Deep ambient multi-stop aura
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        primaryGlow.copy(alpha = if (state == SaraOrbState.IDLE) 0.20f else 0.34f),
+                        primaryGlow.copy(alpha = if (state == SaraOrbState.IDLE) 0.24f else 0.42f),
+                        electricBlue.copy(alpha = 0.16f),
                         secondaryGlow.copy(alpha = 0.12f),
                         Color.Transparent
                     ),
                     center = center,
-                    radius = size.minDimension * 0.50f
+                    radius = size.minDimension * 0.52f
                 ),
-                radius = size.minDimension * 0.50f,
+                radius = size.minDimension * 0.52f,
                 center = center
             )
 
-            // 2. Outer primary orbital arc
-            val outerArcRadius = size.minDimension * 0.42f
+            // 2. Outer primary cyan orbital arc
+            val outerArcRadius = size.minDimension * 0.44f
             rotate(degrees = rotationOuter, pivot = center) {
                 drawArc(
                     brush = Brush.sweepGradient(
                         colors = listOf(
                             Color.Transparent,
-                            primaryGlow.copy(alpha = 0.75f),
-                            primaryGlow,
+                            primaryGlow.copy(alpha = 0.8f),
+                            electricBlue,
                             Color.Transparent
                         ),
                         center = center
                     ),
                     startAngle = 0f,
-                    sweepAngle = 220f,
+                    sweepAngle = 230f,
                     useCenter = false,
                     topLeft = Offset(center.x - outerArcRadius, center.y - outerArcRadius),
                     size = Size(outerArcRadius * 2f, outerArcRadius * 2f),
-                    style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+                    style = Stroke(width = 2.6.dp.toPx(), cap = StrokeCap.Round)
                 )
             }
 
-            // 3. Inner counter-rotating secondary arc
-            val innerArcRadius = size.minDimension * 0.35f
+            // 3. Middle electric-blue/violet counter-rotating arc
+            val midArcRadius = size.minDimension * 0.38f
             rotate(degrees = rotationInner, pivot = center) {
                 drawArc(
                     brush = Brush.sweepGradient(
                         colors = listOf(
                             Color.Transparent,
-                            secondaryGlow.copy(alpha = 0.85f),
-                            secondaryGlow,
+                            secondaryGlow.copy(alpha = 0.88f),
+                            primaryGlow.copy(alpha = 0.7f),
                             Color.Transparent
                         ),
                         center = center
                     ),
                     startAngle = 40f,
-                    sweepAngle = 190f,
+                    sweepAngle = 200f,
                     useCenter = false,
-                    topLeft = Offset(center.x - innerArcRadius, center.y - innerArcRadius),
-                    size = Size(innerArcRadius * 2f, innerArcRadius * 2f),
-                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                    topLeft = Offset(center.x - midArcRadius, center.y - midArcRadius),
+                    size = Size(midArcRadius * 2f, midArcRadius * 2f),
+                    style = Stroke(width = 2.1.dp.toPx(), cap = StrokeCap.Round)
                 )
             }
 
-            // 4. Precision core ring
+            // 4. Inner precision glass rim
             drawCircle(
-                color = primaryGlow.copy(alpha = 0.40f),
-                radius = baseRadius * 1.12f,
+                color = primaryGlow.copy(alpha = 0.45f),
+                radius = baseRadius * 1.15f,
                 center = center,
                 style = Stroke(width = 1.2.dp.toPx())
             )
 
-            // 5. Luminous core sphere
+            // 5. 3D Volumetric Sphere Body
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.90f),
-                        primaryGlow.copy(alpha = 0.82f),
-                        secondaryGlow.copy(alpha = 0.48f),
+                        Color.White.copy(alpha = 0.94f),
+                        primaryGlow.copy(alpha = 0.88f),
+                        electricBlue.copy(alpha = 0.65f),
+                        secondaryGlow.copy(alpha = 0.52f),
                         colors.canvas
                     ),
-                    center = Offset(center.x - baseRadius * 0.22f, center.y - baseRadius * 0.22f),
-                    radius = baseRadius * 1.25f
+                    center = Offset(center.x - baseRadius * 0.28f, center.y - baseRadius * 0.28f),
+                    radius = baseRadius * 1.32f
                 ),
                 radius = baseRadius,
                 center = center
+            )
+
+            // 6. Specular 3D lens highlight
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.55f),
+                        Color.Transparent
+                    ),
+                    center = Offset(center.x - baseRadius * 0.34f, center.y - baseRadius * 0.34f),
+                    radius = baseRadius * 0.42f
+                ),
+                radius = baseRadius * 0.42f,
+                center = Offset(center.x - baseRadius * 0.34f, center.y - baseRadius * 0.34f)
             )
         }
     }

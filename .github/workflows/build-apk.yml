@@ -41,26 +41,27 @@ jobs:
 
       - name: Prepare APK artifact name
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk SARA-v0.2.0-settings-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk SARA-v0.3.0-premium-debug.apk
 
       - name: Upload APK workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SARA-v0.2.0-settings-debug
-          path: SARA-v0.2.0-settings-debug.apk
+          name: SARA-v0.3.0-premium-debug
+          path: SARA-v0.3.0-premium-debug.apk
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.2.0-settings-${{ github.run_number }}
-          name: SARA Settings System (Build #${{ github.run_number }})
+          tag_name: v0.3.0-premium-${{ github.run_number }}
+          name: SARA Premium Identity & Voice (Build #${{ github.run_number }})
           body: |
-            SARA Personal AI Assistant — Complete 10-Module Settings System APK.
-            - Preserves existing HomeScreen, animated SARA Orb, and bilingual greeting
-            - Adds 10-category Settings screen with persistent SharedPreferences & Keystore API config
-            - Real Android runtime permissions, TextToSpeech testing, Wake Service controls, and live Theme/Accent switching
+            SARA Personal AI Assistant — Premium Identity, AI Profile, Home Redesign & Natural Male Voice APK.
+            - Futuristic SARA Brand Identity (`SaraLogo`, volumetric 3D `SaraOrb`, glowing `VoiceWaveform`, gradient & glass buttons)
+            - New AI Assistant Profile Screen (`ProfileScreen`) with animated halo portrait frame, online status, voice persona & quick personalization
+            - Natural Adult Male Bengali Voice Engine (`SaraVoiceEngine`) supporting Gemini Cloud Neural Male (`Charon`) + honest On-Device TTS fallback
+            - Upgraded 10-Module Glassmorphic Settings Screen (`SettingsScreen`) & Redesigned Home Screen (`HomeScreen`)
             - Package: `com.sara.assistant`
-          files: SARA-v0.2.0-settings-debug.apk
+          files: SARA-v0.3.0-premium-debug.apk
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

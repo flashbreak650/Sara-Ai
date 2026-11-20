@@ -1,6 +1,0 @@
-{
-  "name": "SARA — Personal AI Assistant",
-  "description": "Step 1 Android Kotlin & Jetpack Compose foundation for SARA, a Bengali-first futuristic personal AI assistant.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

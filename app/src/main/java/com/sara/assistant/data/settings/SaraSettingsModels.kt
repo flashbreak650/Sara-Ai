@@ -18,9 +18,34 @@ enum class AnswerLength(val labelBn: String, val labelEn: String) {
 }
 
 enum class VoiceGenderPreference(val labelBn: String, val labelEn: String) {
+    MALE("পুরুষ কণ্ঠ (প্রস্তাবিত)", "Natural Male"),
     FEMALE("নারী কণ্ঠ", "Female"),
-    MALE("পুরুষ কণ্ঠ", "Male"),
     SYSTEM_DEFAULT("সিস্টেম ডিফল্ট", "System Default")
+}
+
+enum class VoiceProviderMode(
+    val labelBn: String,
+    val labelEn: String,
+    val descriptionBn: String,
+    val descriptionEn: String
+) {
+    CLOUD_NEURAL_MALE(
+        labelBn = "ক্লাউড নিউরাল পুরুষ কণ্ঠ",
+        labelEn = "Cloud Neural Male (Gemini TTS)",
+        descriptionBn = "স্বাভাবিক, উষ্ণ ও মানবিক বাংলা পুরুষ কণ্ঠ (Charon)",
+        descriptionEn = "Warm, natural human-like Bengali male voice via Cloud TTS"
+    ),
+    ANDROID_NATIVE_TTS(
+        labelBn = "ডিভাইস অফলাইন TTS",
+        labelEn = "On-Device Android TTS",
+        descriptionBn = "ফোনের নিজস্ব ইঞ্জিন ব্যবহার করে (পুরুষ কণ্ঠ সীমিত হতে পারে)",
+        descriptionEn = "Uses installed phone TTS engine (male Bengali depends on device)"
+    )
+}
+
+enum class BengaliPronunciationQuality(val labelBn: String, val labelEn: String) {
+    NATURAL_HUMAN("প্রাকৃতিক ও স্পষ্ট (Natural Pauses)", "Natural Pauses & Tone"),
+    STANDARD_FAST("দ্রুত ও সরাসরি", "Standard Direct")
 }
 
 enum class VoiceLanguageOption(val labelBn: String, val labelEn: String, val localeTag: String) {
@@ -67,9 +92,9 @@ enum class AccentColorOption(
     val secondaryHex: Long
 ) {
     CYAN("সায়ান", "Cyan", 0xFF22D3EE, 0xFF8B5CF6),
+    ELECTRIC_BLUE("ইলেকট্রিক ব্লু", "Electric Blue", 0xFF38BDF8, 0xFF818CF8),
     VIOLET("ভায়োলেট", "Violet", 0xFF8B5CF6, 0xFF22D3EE),
-    EMERALD("এমেরাল্ড", "Emerald", 0xFF10B981, 0xFF22D3EE),
-    ELECTRIC_BLUE("ইলেকট্রিক ব্লু", "Electric Blue", 0xFF38BDF8, 0xFFA78BFA)
+    EMERALD("এমেরাল্ড", "Emerald", 0xFF10B981, 0xFF22D3EE)
 }
 
 enum class TextSizeOption(val labelBn: String, val labelEn: String, val scaleFactor: Float) {
@@ -94,24 +119,29 @@ data class MemoryItem(
 data class ConversationEntry(
     val id: String,
     val message: String,
-    val timestampMillis: Long
+    val timestampMillis: Long,
+    val isAssistant: Boolean = false
 )
 
 data class SaraSettings(
-    // 1. AI Personality
+    // 1. Identity & AI Personality
     val assistantName: String = "SARA",
-    val personalityDescription: String = "Helpful, calm, and intelligent Bengali-first assistant",
+    val assistantSubtitle: String = "Your Personal AI",
+    val personalityDescription: String = "Warm, calm, intelligent Bengali-first personal AI companion",
     val personalityMode: AssistantPersonalityMode = AssistantPersonalityMode.FRIENDLY,
     val responseStyle: ResponseStyle = ResponseStyle.BALANCED,
     val answerLength: AnswerLength = AnswerLength.SHORT,
 
-    // 2. Voice Settings
+    // 2. Natural Male Voice Settings
     val voiceResponsesEnabled: Boolean = true,
-    val voiceGender: VoiceGenderPreference = VoiceGenderPreference.FEMALE,
-    val speechSpeed: Float = 1.0f,
+    val voiceProvider: VoiceProviderMode = VoiceProviderMode.CLOUD_NEURAL_MALE,
+    val voiceGender: VoiceGenderPreference = VoiceGenderPreference.MALE,
+    val speechSpeed: Float = 0.98f,
     val speechPitch: Float = 1.0f,
     val voiceLanguage: VoiceLanguageOption = VoiceLanguageOption.BENGALI,
-    val voiceVolume: Float = 0.85f,
+    val voiceVolume: Float = 0.90f,
+    val bengaliPronunciationQuality: BengaliPronunciationQuality = BengaliPronunciationQuality.NATURAL_HUMAN,
+    val cloudTtsEndpointUrl: String = "",
 
     // 3. Wake Word Settings
     val wakeWordEnabled: Boolean = false,
