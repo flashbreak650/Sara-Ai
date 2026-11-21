@@ -286,6 +286,7 @@ class SaraSettingsRepository private constructor(context: Context) {
             cloudTtsEndpointUrl = prefs[KEY_CLOUD_TTS_URL] ?: defaults.cloudTtsEndpointUrl,
 
             wakeWordEnabled = prefs[KEY_WAKE_WORD_ENABLED] ?: defaults.wakeWordEnabled,
+            continuousVoiceMode = prefs[KEY_CONTINUOUS_VOICE_MODE] ?: defaults.continuousVoiceMode,
             wakeListeningPaused = prefs[KEY_WAKE_PAUSED] ?: defaults.wakeListeningPaused,
             customWakeWord = prefs[KEY_CUSTOM_WAKE_WORD] ?: defaults.customWakeWord,
             floatingOverlayEnabled = prefs[KEY_FLOATING_OVERLAY] ?: defaults.floatingOverlayEnabled,
@@ -343,6 +344,7 @@ class SaraSettingsRepository private constructor(context: Context) {
                 prefs[KEY_CLOUD_TTS_URL] = s.cloudTtsEndpointUrl.trim()
 
                 prefs[KEY_WAKE_WORD_ENABLED] = s.wakeWordEnabled
+                prefs[KEY_CONTINUOUS_VOICE_MODE] = s.continuousVoiceMode
                 prefs[KEY_WAKE_PAUSED] = s.wakeListeningPaused
                 prefs[KEY_CUSTOM_WAKE_WORD] = s.customWakeWord.ifBlank { "Hey SARA" }
                 prefs[KEY_FLOATING_OVERLAY] = s.floatingOverlayEnabled
@@ -562,6 +564,7 @@ class SaraSettingsRepository private constructor(context: Context) {
         private val KEY_CLOUD_TTS_URL = stringPreferencesKey("cloud_tts_url")
 
         private val KEY_WAKE_WORD_ENABLED = booleanPreferencesKey("wake_word_enabled")
+        private val KEY_CONTINUOUS_VOICE_MODE = booleanPreferencesKey("continuous_voice_mode")
         private val KEY_WAKE_PAUSED = booleanPreferencesKey("wake_listening_paused")
         private val KEY_CUSTOM_WAKE_WORD = stringPreferencesKey("custom_wake_word")
         private val KEY_FLOATING_OVERLAY = booleanPreferencesKey("floating_overlay_enabled")

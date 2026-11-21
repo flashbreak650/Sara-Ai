@@ -120,6 +120,8 @@ class SaraFloatingOverlayManager(
 
         val statusLabel = when {
             state.isPaused -> "বিরতি · Paused"
+            state.reconnecting -> "পুনঃসংযোগ... · Reconnecting"
+            state.phase == BackgroundAssistantPhase.LISTENING_COMMAND && state.continuousModeActive -> "নিরবচ্ছিন্ন · Listening"
             state.phase == BackgroundAssistantPhase.LISTENING_COMMAND -> "কথা বলুন · Listening"
             state.phase == BackgroundAssistantPhase.LISTENING_WAKE -> "শুনছি · Ready"
             state.phase == BackgroundAssistantPhase.THINKING -> "ভাবছি · Thinking"

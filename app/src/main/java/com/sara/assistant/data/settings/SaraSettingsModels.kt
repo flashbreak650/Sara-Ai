@@ -230,8 +230,9 @@ data class SaraSettings(
     val bengaliPronunciationQuality: BengaliPronunciationQuality = BengaliPronunciationQuality.NATURAL_HUMAN,
     val cloudTtsEndpointUrl: String = "",
 
-    // 3. Background Home Screen Assistant & Wake Word Settings
+    // 3. Background Home Screen Assistant & Continuous Voice Mode
     val wakeWordEnabled: Boolean = false,
+    val continuousVoiceMode: Boolean = true,
     val wakeListeningPaused: Boolean = false,
     val customWakeWord: String = "Hey SARA",
     val floatingOverlayEnabled: Boolean = true,
@@ -266,7 +267,7 @@ data class SaraSettings(
     val backgroundServiceNotificationEnabled: Boolean = true,
 
     // 9. Privacy & Security
-    val micPrivacyAutoMuteOnLock: Boolean = true,
+    val micPrivacyAutoMuteOnLock: Boolean = false,
     val screenCaptureAlwaysConfirm: Boolean = true,
     val appLockEnabled: Boolean = false
 )

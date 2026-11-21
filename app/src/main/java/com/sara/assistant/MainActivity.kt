@@ -192,6 +192,10 @@ class MainActivity : ComponentActivity() {
                                         settingsInitialPage = SettingsFeaturePage.HUB
                                         destination = SaraDestination.SETTINGS
                                     },
+                                    onOpenFemaleVoices = {
+                                        settingsInitialPage = SettingsFeaturePage.FEMALE_VOICE
+                                        destination = SaraDestination.SETTINGS
+                                    },
                                     onOpenBackgroundSettings = {
                                         settingsInitialPage = SettingsFeaturePage.BACKGROUND_ASSISTANT
                                         destination = SaraDestination.SETTINGS
@@ -213,6 +217,18 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
                                     },
+                                    onToggleContinuousVoice = {
+                                        voiceEngine.stopPlayback()
+                                        val snap = AndroidPermissionHelper.captureSnapshot(applicationContext)
+                                        if (!snap.microphoneGranted) {
+                                            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        } else {
+                                            SaraWakeService.toggleContinuousVoice(
+                                                applicationContext,
+                                                settings.customWakeWord
+                                            )
+                                        }
+                                    },
                                     onTogglePauseService = {
                                         if (backgroundState.isPaused) {
                                             SaraWakeService.resume(applicationContext)
@@ -224,7 +240,12 @@ class MainActivity : ComponentActivity() {
                                         SaraWakeService.stop(applicationContext)
                                     },
                                     onTalkOutside = {
-                                        SaraWakeService.talkNow(applicationContext, settings.customWakeWord)
+                                        val snap = AndroidPermissionHelper.captureSnapshot(applicationContext)
+                                        if (!snap.microphoneGranted) {
+                                            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        } else {
+                                            SaraWakeService.talkNow(applicationContext, settings.customWakeWord)
+                                        }
                                     },
                                     onOrbSpeak = { message ->
                                         voiceEngine.speakIfEnabled(message, settings)

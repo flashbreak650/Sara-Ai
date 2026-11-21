@@ -52,14 +52,14 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.5.0-aura-${{ github.run_number }}
-          name: SARA Obsidian Aura & Instant AI v0.5.0 (Build #${{ github.run_number }})
+          tag_name: v0.5.1-aura-${{ github.run_number }}
+          name: SARA Obsidian Aura Continuous Voice v0.5.1 (Build #${{ github.run_number }})
           body: |
-            SARA Personal AI Assistant — v0.5.0 Obsidian Aura Redesign & Ultra-Fast Reply Engine.
-            - **Obsidian + Crimson Aura Design**: Sleek deep obsidian surfaces, multi-ring glowing Vortex Mic Orb, inline prompt composer, 2x2 dark gradient Bento cards, Today's Insight/Reply card, bottom navigation dock with floating center orb, and **Aura Control** visual theme switcher (`Crimson Aura`, `Cyan Matrix`, `Violet Pulse`, `Emerald Core`, `Midnight Blue`)
-            - **Ultra-Fast AI Replies**: Low-thinking Gemini API optimization (`thinkingConfig: LOW/MINIMAL`), tightened HTTP timeouts, and instant `<5ms` zero-latency Bengali & English command/greeting responses
-            - **Human Female Bengali Voice System**: 6 warm natural female voices (`Kore`, `Zephyr`, `Aoede`, `Leda`, `SaraSweet`, `SaraVelvet`) with 24kHz fidelity & disk WAV cache
-            - **Outside-App Background Assistant**: Obsidian + Crimson floating bubble & expandable card over Android Home Screen + persistent DataStore settings
+            SARA Personal AI Assistant — v0.5.1 Continuous Voice Mode & Female Voice Upgrade (Obsidian + Crimson Aura).
+            - **Continuous Voice Mode**: One-tap ON/OFF continuous voice session; automatically resumes listening after AI replies and handles natural pauses silently until stopped
+            - **Zero-Beep Recognizer**: Eliminates SpeechRecognizer start/stop pop/beep sounds without muting SARA's spoken voice
+            - **Female Bengali Voices Fixed**: Fixes Android native male `-bnd-`/`-ban-` misidentification, differentiates all 6 female voice personas cleanly, and preserves 24kHz Gemini Neural TTS
+            - **Background & Screen-Off + Auto-Reconnect**: Single microphone session lock, `PARTIAL_WAKE_LOCK` support, and `ConnectivityManager` network auto-reconnect
             - Package: `com.sara.assistant`
           files: SARA-v0.5.0-aura-debug.apk
           prerelease: true

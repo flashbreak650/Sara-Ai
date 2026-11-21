@@ -563,6 +563,20 @@ fun SettingsScreen(
                                     }
                                 )
 
+                                SettingsSwitchRow(
+                                    titleBn = "নিরবচ্ছিন্ন ভয়েস মোড · Continuous Voice",
+                                    subtitleEn = "Once ON, stays active across pauses & replies until you tap Stop/OFF",
+                                    checked = settings.continuousVoiceMode,
+                                    onCheckedChange = { continuous ->
+                                        repository.updateSettings { it.copy(continuousVoiceMode = continuous) }
+                                        wakeFeedback = if (continuous) {
+                                            "নিরবচ্ছিন্ন ভয়েস মোড সক্রিয় হয়েছে।"
+                                        } else {
+                                            "শুধু ওয়েক ওয়ার্ড মোড সক্রিয় হয়েছে।"
+                                        }
+                                    }
+                                )
+
                                 HorizontalDivider(color = colors.border)
 
                                 SettingsSwitchRow(
@@ -822,19 +836,30 @@ fun SettingsScreen(
 
                                 FemaleVoicePersona.entries.forEach { persona ->
                                     val isSelected = persona == settings.femaleVoicePersona
+                                    val triggerPersonaPreview: () -> Unit = {
+                                        val updatedSettings = settings.copy(
+                                            femaleVoicePersona = persona,
+                                            voiceGender = VoiceGenderPreference.FEMALE,
+                                            voiceResponsesEnabled = true
+                                        )
+                                        repository.updateSettings {
+                                            it.copy(
+                                                femaleVoicePersona = persona,
+                                                voiceGender = VoiceGenderPreference.FEMALE,
+                                                voiceResponsesEnabled = true
+                                            )
+                                        }
+                                        voiceFeedback = "${persona.labelBn} প্রিভিউ চলছে..."
+                                        voiceEngine.previewPersona(persona, updatedSettings) { result ->
+                                            voiceFeedback = "${result.providerUsed}: ${result.message}"
+                                        }
+                                    }
                                     Surface(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(vertical = 4.dp)
                                             .clip(RoundedCornerShape(16.dp))
-                                            .clickable {
-                                                repository.updateSettings {
-                                                    it.copy(
-                                                        femaleVoicePersona = persona,
-                                                        voiceGender = VoiceGenderPreference.FEMALE
-                                                    )
-                                                }
-                                            },
+                                            .clickable { triggerPersonaPreview() },
                                         shape = RoundedCornerShape(16.dp),
                                         color = if (isSelected) colors.elevated else colors.canvas,
                                         border = BorderStroke(
@@ -877,18 +902,7 @@ fun SettingsScreen(
                                             SaraGlassButton(
                                                 text = "শুনুন",
                                                 icon = Icons.Rounded.VolumeUp,
-                                                onClick = {
-                                                    repository.updateSettings {
-                                                        it.copy(
-                                                            femaleVoicePersona = persona,
-                                                            voiceGender = VoiceGenderPreference.FEMALE
-                                                        )
-                                                    }
-                                                    voiceFeedback = "${persona.labelBn} প্রিভিউ চলছে..."
-                                                    voiceEngine.previewPersona(persona, settings) { result ->
-                                                        voiceFeedback = "${result.providerUsed}: ${result.message}"
-                                                    }
-                                                }
+                                                onClick = triggerPersonaPreview
                                             )
                                         }
                                     }

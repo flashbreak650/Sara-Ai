@@ -56,17 +56,25 @@ object SaraAssistantBrain {
             return BrainReply(text = localReply, usedGemini = false)
         }
 
-        // 2. Try configured backend /api/chat proxy
+        // 2. Try configured backend /api/chat proxy (with transient network retry)
         val proxyChatUrl = resolveChatProxyUrl(settings.apiProxyUrl)
         if (proxyChatUrl.isNotEmpty()) {
             callProxyChat(proxyChatUrl, clean, settings, memories, isBn)?.let { reply ->
                 return BrainReply(text = reply, usedGemini = true)
             }
+            kotlinx.coroutines.delay(400L)
+            callProxyChat(proxyChatUrl, clean, settings, memories, isBn)?.let { reply ->
+                return BrainReply(text = reply, usedGemini = true)
+            }
         }
 
-        // 3. Try direct Keystore-encrypted Gemini API key (with LOW/MINIMAL thinking for fast replies)
+        // 3. Try direct Keystore-encrypted Gemini API key (with LOW/MINIMAL thinking + transient retry)
         val apiKey = secureKeyStorage.decryptApiKeyOrNull()?.takeIf { it.isNotBlank() }
         if (apiKey != null) {
+            callDirectGeminiChat(apiKey, clean, settings, memories, history, isBn)?.let { reply ->
+                return BrainReply(text = reply, usedGemini = true)
+            }
+            kotlinx.coroutines.delay(450L)
             callDirectGeminiChat(apiKey, clean, settings, memories, history, isBn)?.let { reply ->
                 return BrainReply(text = reply, usedGemini = true)
             }

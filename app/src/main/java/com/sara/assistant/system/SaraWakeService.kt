@@ -1,6 +1,7 @@
 package com.sara.assistant.system
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -12,11 +13,17 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.media.AudioManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -36,6 +43,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicInteger
 
 enum class BackgroundAssistantPhase {
     IDLE,
@@ -49,19 +57,24 @@ enum class BackgroundAssistantPhase {
 data class BackgroundAssistantState(
     val serviceRunning: Boolean = false,
     val isPaused: Boolean = false,
+    val continuousModeActive: Boolean = false,
     val phase: BackgroundAssistantPhase = BackgroundAssistantPhase.IDLE,
     val lastHeardText: String = "",
     val lastResponseText: String = "",
     val statusMessage: String = "স্ট্যান্ডবাই",
-    val overlayVisible: Boolean = false
+    val overlayVisible: Boolean = false,
+    val reconnecting: Boolean = false
 )
 
 /**
- * Real Android Foreground Service enabling SARA outside the app:
- * - Listens continuously for wake word ("Hey SARA" / custom phrase) when permitted and unpaused.
- * - Handles full voice conversation outside the app through phone speaker via SaraVoiceEngine.
- * - Renders optional draggable floating bubble + compact conversation card via SaraFloatingOverlayManager.
- * - Displays transparent ongoing notification with Talk / Pause-Resume / Stop controls.
+ * Unified Android Foreground Service powering SARA's Continuous Voice Mode & Outside-App Assistant:
+ * - Single active microphone session lock (AtomicInteger token guard prevents duplicate recognizers).
+ * - Continuous hands-free loop: automatically resumes listening after SARA finishes speaking and stays
+ *   active across natural pauses until the user explicitly turns OFF / Stop / Pause.
+ * - Silent recognition chime suppressor: briefly mutes recognizer system/notification/music chimes
+ *   during start/cancel transitions and restores cleanly before SARA speaks.
+ * - Background + screen-off execution via FOREGROUND_SERVICE_MICROPHONE + PARTIAL_WAKE_LOCK.
+ * - ConnectivityManager.NetworkCallback + exponential backoff auto-reconnect.
  */
 class SaraWakeService : Service() {
 
@@ -71,11 +84,62 @@ class SaraWakeService : Service() {
     private lateinit var repository: SaraSettingsRepository
     private lateinit var voiceEngine: SaraVoiceEngine
     private lateinit var overlayManager: SaraFloatingOverlayManager
+    private lateinit var audioManager: AudioManager
+    private lateinit var connectivityManager: ConnectivityManager
 
     private var speechRecognizer: SpeechRecognizer? = null
     private var listeningMode: BackgroundAssistantPhase = BackgroundAssistantPhase.IDLE
     private var isDeviceScreenLocked = false
-    private var restartScheduled = false
+    private var isNetworkAvailable = true
+    private var reconnectAttempt = 0
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    private val sessionGeneration = AtomicInteger(0)
+    private var pendingLoopRunnable: Runnable? = null
+    private var pendingUnmuteRunnable: Runnable? = null
+    private val mutedStreamsByUs = mutableSetOf<Int>()
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            mainHandler.post {
+                val wasDisconnected = !isNetworkAvailable
+                isNetworkAvailable = true
+                reconnectAttempt = 0
+                if (_assistantState.value.serviceRunning && !_assistantState.value.isPaused) {
+                    if (_assistantState.value.reconnecting || wasDisconnected) {
+                        updateState {
+                            it.copy(
+                                reconnecting = false,
+                                statusMessage = if (repository.settings.value.continuousVoiceMode) {
+                                    "সংযোগ ফিরে এসেছে · নিরবচ্ছিন্ন ভয়েস সক্রিয়"
+                                } else {
+                                    "সংযোগ ফিরে এসেছে · শুনছি"
+                                }
+                            )
+                        }
+                        if (!voiceEngine.isSpeaking.value && listeningMode != BackgroundAssistantPhase.THINKING) {
+                            scheduleVoiceLoop(280L)
+                        }
+                    }
+                }
+            }
+        }
+
+        override fun onLost(network: Network) {
+            mainHandler.post {
+                isNetworkAvailable = hasActiveInternet()
+                if (!isNetworkAvailable && _assistantState.value.serviceRunning && !_assistantState.value.isPaused) {
+                    updateState {
+                        it.copy(
+                            reconnecting = true,
+                            statusMessage = "নেটওয়ার্ক বিচ্ছিন্ন — পুনঃসংযোগের অপেক্ষায়..."
+                        )
+                    }
+                    refreshNotification()
+                }
+            }
+        }
+    }
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -84,12 +148,14 @@ class SaraWakeService : Service() {
                     isDeviceScreenLocked = true
                     if (repository.settings.value.micPrivacyAutoMuteOnLock) {
                         pauseRecognizerForPrivacy()
+                    } else if (_assistantState.value.serviceRunning && !_assistantState.value.isPaused) {
+                        acquireVoiceWakeLock()
                     }
                 }
                 Intent.ACTION_USER_PRESENT, Intent.ACTION_SCREEN_ON -> {
                     isDeviceScreenLocked = false
                     if (_assistantState.value.serviceRunning && !_assistantState.value.isPaused) {
-                        scheduleWakeLoop(350L)
+                        scheduleVoiceLoop(300L)
                     }
                 }
             }
@@ -99,12 +165,16 @@ class SaraWakeService : Service() {
     override fun onCreate() {
         super.onCreate()
         repository = SaraSettingsRepository.getInstance(applicationContext)
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        isNetworkAvailable = hasActiveInternet()
+
         voiceEngine = SaraVoiceEngine(applicationContext, repository.secureKeyStorage)
         overlayManager = SaraFloatingOverlayManager(
             context = applicationContext,
             onTalkClick = { triggerManualVoiceConversation() },
             onPauseResumeClick = { togglePauseFromControl() },
-            onStopConversationClick = { stopConversationAndPause() },
+            onStopConversationClick = { stopAllAndShutdownService() },
             onOpenAppClick = {
                 val appIntent = Intent(applicationContext, MainActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -118,16 +188,21 @@ class SaraWakeService : Service() {
             }
         )
 
-        val filter = IntentFilter().apply {
+        val screenFilter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_USER_PRESENT)
             addAction(Intent.ACTION_SCREEN_ON)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(screenReceiver, filter, RECEIVER_NOT_EXPORTED)
+            registerReceiver(screenReceiver, screenFilter, RECEIVER_NOT_EXPORTED)
         } else {
-            registerReceiver(screenReceiver, filter)
+            registerReceiver(screenReceiver, screenFilter)
         }
+
+        val netRequest = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        runCatching { connectivityManager.registerNetworkCallback(netRequest, networkCallback) }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -146,8 +221,21 @@ class SaraWakeService : Service() {
                 setPausedState(false)
                 return START_STICKY
             }
+            ACTION_TOGGLE_CONTINUOUS -> {
+                if (_isRunning.value && !_assistantState.value.isPaused) {
+                    stopAllAndShutdownService()
+                    return START_NOT_STICKY
+                } else {
+                    return startContinuousOrWake(intent, forceActive = true)
+                }
+            }
             ACTION_TALK_NOW -> {
+                if (!hasMicPermission()) {
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
                 ensureForegroundStarted(repository.settings.value)
+                _isRunning.value = true
                 triggerManualVoiceConversation()
                 return START_STICKY
             }
@@ -163,16 +251,16 @@ class SaraWakeService : Service() {
             }
         }
 
-        val hasMic = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
+        return startContinuousOrWake(intent, forceActive = false)
+    }
 
-        if (!hasMic) {
+    private fun startContinuousOrWake(intent: Intent?, forceActive: Boolean): Int {
+        if (!hasMicPermission()) {
             _isRunning.value = false
             updateState {
                 it.copy(
                     serviceRunning = false,
+                    continuousModeActive = false,
                     phase = BackgroundAssistantPhase.IDLE,
                     statusMessage = "মাইক্রোফোন অনুমতি প্রয়োজন"
                 )
@@ -182,11 +270,16 @@ class SaraWakeService : Service() {
         }
 
         val settings = repository.settings.value
-        val startPaused = intent?.getBooleanExtra(EXTRA_START_PAUSED, settings.wakeListeningPaused)
-            ?: settings.wakeListeningPaused
+        val startPaused = if (forceActive) {
+            false
+        } else {
+            intent?.getBooleanExtra(EXTRA_START_PAUSED, settings.wakeListeningPaused)
+                ?: settings.wakeListeningPaused
+        }
 
         ensureForegroundStarted(settings)
         _isRunning.value = true
+        reconnectAttempt = 0
 
         repository.updateSettings {
             it.copy(
@@ -199,18 +292,45 @@ class SaraWakeService : Service() {
         if (startPaused) {
             setPausedState(true)
         } else {
+            acquireVoiceWakeLock()
+            val continuous = settings.continuousVoiceMode
+            val initialPhase = if (continuous) {
+                BackgroundAssistantPhase.LISTENING_COMMAND
+            } else {
+                BackgroundAssistantPhase.LISTENING_WAKE
+            }
+            listeningMode = initialPhase
             updateState {
                 it.copy(
                     serviceRunning = true,
                     isPaused = false,
-                    phase = BackgroundAssistantPhase.LISTENING_WAKE,
-                    statusMessage = "\"${settings.customWakeWord}\" শোনার জন্য প্রস্তুত"
+                    continuousModeActive = continuous,
+                    phase = initialPhase,
+                    reconnecting = false,
+                    statusMessage = if (continuous) {
+                        "নিরবচ্ছিন্ন ভয়েস সক্রিয় — কথা বলুন..."
+                    } else {
+                        "\"${settings.customWakeWord}\" শোনার জন্য প্রস্তুত"
+                    }
                 )
             }
             syncOverlayVisibility()
-            scheduleWakeLoop(250L)
+            scheduleVoiceLoop(180L)
         }
         return START_STICKY
+    }
+
+    private fun hasMicPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun hasActiveInternet(): Boolean {
+        val activeNetwork = connectivityManager.activeNetwork ?: return false
+        val caps = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     private fun ensureForegroundStarted(settings: SaraSettings) {
@@ -227,6 +347,30 @@ class SaraWakeService : Service() {
         }
     }
 
+    @SuppressLint("WakelockTimeout")
+    private fun acquireVoiceWakeLock() {
+        runCatching {
+            if (wakeLock == null) {
+                val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SARA:ContinuousVoiceWakeLock").apply {
+                    setReferenceCounted(false)
+                }
+            }
+            if (wakeLock?.isHeld == false) {
+                // Held while user has active Continuous Voice ON; released immediately on Stop/Pause/onDestroy
+                wakeLock?.acquire(4 * 60 * 60 * 1000L)
+            }
+        }
+    }
+
+    private fun releaseVoiceWakeLock() {
+        runCatching {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        }
+    }
+
     private fun togglePauseFromControl() {
         val nextPaused = !_assistantState.value.isPaused
         setPausedState(nextPaused)
@@ -235,26 +379,44 @@ class SaraWakeService : Service() {
     private fun setPausedState(paused: Boolean) {
         repository.updateSettings { it.copy(wakeListeningPaused = paused) }
         if (paused) {
-            destroyRecognizer()
+            cancelPendingVoiceLoop()
+            destroyRecognizerSilently()
+            unmuteStreamsIfHeld()
             voiceEngine.stopPlayback()
+            releaseVoiceWakeLock()
+            listeningMode = BackgroundAssistantPhase.PAUSED
             updateState {
                 it.copy(
                     serviceRunning = true,
                     isPaused = true,
                     phase = BackgroundAssistantPhase.PAUSED,
-                    statusMessage = "লিসেনিং বিরতিতে আছে (Paused)"
+                    statusMessage = "ভয়েস অ্যাসিস্ট্যান্ট বিরতিতে (Paused)"
                 )
             }
         } else {
+            acquireVoiceWakeLock()
+            val settings = repository.settings.value
+            val continuous = settings.continuousVoiceMode
+            listeningMode = if (continuous) {
+                BackgroundAssistantPhase.LISTENING_COMMAND
+            } else {
+                BackgroundAssistantPhase.LISTENING_WAKE
+            }
             updateState {
                 it.copy(
                     serviceRunning = true,
                     isPaused = false,
-                    phase = BackgroundAssistantPhase.LISTENING_WAKE,
-                    statusMessage = "\"${repository.settings.value.customWakeWord}\" শোনার জন্য প্রস্তুত"
+                    continuousModeActive = continuous,
+                    phase = listeningMode,
+                    reconnecting = false,
+                    statusMessage = if (continuous) {
+                        "নিরবচ্ছিন্ন ভয়েস সক্রিয় — কথা বলুন..."
+                    } else {
+                        "\"${settings.customWakeWord}\" শোনার জন্য প্রস্তুত"
+                    }
                 )
             }
-            scheduleWakeLoop(200L)
+            scheduleVoiceLoop(200L)
         }
         syncOverlayVisibility()
         refreshNotification()
@@ -262,19 +424,18 @@ class SaraWakeService : Service() {
 
     private fun stopConversationAndPause() {
         voiceEngine.stopPlayback()
-        destroyRecognizer()
+        cancelPendingVoiceLoop()
+        destroyRecognizerSilently()
+        unmuteStreamsIfHeld()
         setPausedState(true)
     }
 
     private fun triggerManualVoiceConversation() {
-        val hasMic = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-        if (!hasMic) return
-
+        if (!hasMicPermission()) return
+        cancelPendingVoiceLoop()
         voiceEngine.stopPlayback()
-        repository.updateSettings { it.copy(wakeListeningPaused = false) }
+        acquireVoiceWakeLock()
+        repository.updateSettings { it.copy(wakeWordEnabled = true, wakeListeningPaused = false) }
         if (overlayManager.canDrawOverlay() && repository.settings.value.floatingOverlayEnabled) {
             overlayManager.expandToCard()
         }
@@ -282,7 +443,10 @@ class SaraWakeService : Service() {
     }
 
     private fun pauseRecognizerForPrivacy() {
-        destroyRecognizer()
+        cancelPendingVoiceLoop()
+        destroyRecognizerSilently()
+        unmuteStreamsIfHeld()
+        releaseVoiceWakeLock()
         updateState {
             it.copy(
                 phase = BackgroundAssistantPhase.PAUSED,
@@ -306,23 +470,34 @@ class SaraWakeService : Service() {
         }
     }
 
-    private fun scheduleWakeLoop(delayMs: Long) {
-        if (restartScheduled) return
-        restartScheduled = true
-        mainHandler.postDelayed({
-            restartScheduled = false
+    private fun cancelPendingVoiceLoop() {
+        pendingLoopRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingLoopRunnable = null
+    }
+
+    private fun scheduleVoiceLoop(delayMs: Long) {
+        cancelPendingVoiceLoop()
+        val runnable = Runnable {
+            pendingLoopRunnable = null
             val state = _assistantState.value
             val settings = repository.settings.value
             if (!state.serviceRunning || state.isPaused || (isDeviceScreenLocked && settings.micPrivacyAutoMuteOnLock)) {
-                return@postDelayed
+                return@Runnable
             }
-            if (state.phase == BackgroundAssistantPhase.SPEAKING || state.phase == BackgroundAssistantPhase.THINKING) {
-                return@postDelayed
+            if (voiceEngine.isSpeaking.value ||
+                state.phase == BackgroundAssistantPhase.SPEAKING ||
+                state.phase == BackgroundAssistantPhase.THINKING
+            ) {
+                return@Runnable
             }
-            if (listeningMode != BackgroundAssistantPhase.LISTENING_COMMAND) {
+            if (settings.continuousVoiceMode || listeningMode == BackgroundAssistantPhase.LISTENING_COMMAND) {
+                startCommandListening()
+            } else {
                 startWakeWordListening()
             }
-        }, delayMs)
+        }
+        pendingLoopRunnable = runnable
+        mainHandler.postDelayed(runnable, delayMs)
     }
 
     private fun startWakeWordListening() {
@@ -333,6 +508,7 @@ class SaraWakeService : Service() {
         listeningMode = BackgroundAssistantPhase.LISTENING_WAKE
         updateState {
             it.copy(
+                continuousModeActive = false,
                 phase = BackgroundAssistantPhase.LISTENING_WAKE,
                 statusMessage = "\"${repository.settings.value.customWakeWord}\" শুনছি..."
             )
@@ -346,23 +522,75 @@ class SaraWakeService : Service() {
             updateState { it.copy(statusMessage = "ডিভাইসে স্পিচ রিকগনিশন পাওয়া যায়নি") }
             return
         }
+        val continuous = repository.settings.value.continuousVoiceMode
         listeningMode = BackgroundAssistantPhase.LISTENING_COMMAND
         updateState {
             it.copy(
+                serviceRunning = true,
                 isPaused = false,
+                continuousModeActive = continuous,
                 phase = BackgroundAssistantPhase.LISTENING_COMMAND,
-                statusMessage = "বলুন, আমি শুনছি..."
+                statusMessage = if (continuous) "নিরবচ্ছিন্ন শুনছি — বলুন..." else "বলুন, আমি শুনছি..."
             )
         }
         refreshNotification()
         launchRecognizer(isCommandMode = true)
     }
 
+    /**
+     * Suppresses Android's SpeechRecognizer start/stop beep/pop chimes cleanly without
+     * affecting SARA's spoken voice output. Always restores streams before TTS plays.
+     */
+    private fun muteRecognizerChimeBriefly(includeMediaStream: Boolean) {
+        if (voiceEngine.isSpeaking.value) return
+        val targetStreams = buildList {
+            add(AudioManager.STREAM_NOTIFICATION)
+            add(AudioManager.STREAM_SYSTEM)
+            if (includeMediaStream) add(AudioManager.STREAM_MUSIC)
+        }
+        for (stream in targetStreams) {
+            runCatching {
+                val alreadyMuted = audioManager.isStreamMute(stream)
+                if (!alreadyMuted && !mutedStreamsByUs.contains(stream)) {
+                    audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_MUTE, 0)
+                    mutedStreamsByUs.add(stream)
+                }
+            }
+        }
+        pendingUnmuteRunnable?.let { mainHandler.removeCallbacks(it) }
+        val safetyUnmute = Runnable { unmuteStreamsIfHeld() }
+        pendingUnmuteRunnable = safetyUnmute
+        mainHandler.postDelayed(safetyUnmute, 420L)
+    }
+
+    private fun unmuteStreamsIfHeld() {
+        pendingUnmuteRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingUnmuteRunnable = null
+        if (mutedStreamsByUs.isEmpty()) return
+        val toRestore = mutedStreamsByUs.toList()
+        mutedStreamsByUs.clear()
+        for (stream in toRestore) {
+            runCatching {
+                audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, 0)
+            }
+        }
+    }
+
     private fun launchRecognizer(isCommandMode: Boolean) {
-        destroyRecognizer()
+        if (voiceEngine.isSpeaking.value) {
+            return
+        }
+
+        // Strict Single Microphone Session Lock: invalidate old recognizer before opening a new one
+        val sessionToken = sessionGeneration.incrementAndGet()
+        destroyRecognizerSilently(incrementGeneration = false)
+
+        muteRecognizerChimeBriefly(includeMediaStream = true)
+
         val recognizer = runCatching { SpeechRecognizer.createSpeechRecognizer(applicationContext) }.getOrNull()
         if (recognizer == null) {
-            scheduleWakeLoop(2000L)
+            unmuteStreamsIfHeld()
+            scheduleVoiceLoop(1500L)
             return
         }
         speechRecognizer = recognizer
@@ -371,59 +599,131 @@ class SaraWakeService : Service() {
         val languageTag = if (settings.voiceLanguage == VoiceLanguageOption.BENGALI) "bn-BD" else "en-US"
 
         recognizer.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onReadyForSpeech(params: Bundle?) {
+                if (sessionToken != sessionGeneration.get()) return
+                reconnectAttempt = 0
+                if (_assistantState.value.reconnecting) {
+                    updateState { it.copy(reconnecting = false) }
+                }
+                // Unmute audio streams right after recognizer chime window has passed
+                mainHandler.postDelayed({ unmuteStreamsIfHeld() }, 140L)
+            }
+
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
 
             override fun onError(error: Int) {
-                if (!_assistantState.value.serviceRunning || _assistantState.value.isPaused) return
-                if (isCommandMode && error == SpeechRecognizer.ERROR_NO_MATCH) {
-                    listeningMode = BackgroundAssistantPhase.LISTENING_WAKE
-                    scheduleWakeLoop(500L)
-                } else {
-                    val backoff = if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 1200L else 600L
-                    scheduleWakeLoop(backoff)
+                if (sessionToken != sessionGeneration.get()) return
+                if (!_assistantState.value.serviceRunning || _assistantState.value.isPaused) {
+                    unmuteStreamsIfHeld()
+                    return
+                }
+                if (voiceEngine.isSpeaking.value || listeningMode == BackgroundAssistantPhase.THINKING) {
+                    unmuteStreamsIfHeld()
+                    return
+                }
+
+                muteRecognizerChimeBriefly(includeMediaStream = false)
+                destroyRecognizerSilently(incrementGeneration = false)
+
+                val continuous = repository.settings.value.continuousVoiceMode
+                when (error) {
+                    SpeechRecognizer.ERROR_NO_MATCH,
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
+                        // User paused or didn't speak yet — silently keep Continuous Voice active!
+                        reconnectAttempt = 0
+                        if (continuous) {
+                            listeningMode = BackgroundAssistantPhase.LISTENING_COMMAND
+                            scheduleVoiceLoop(260L)
+                        } else {
+                            listeningMode = BackgroundAssistantPhase.LISTENING_WAKE
+                            scheduleVoiceLoop(320L)
+                        }
+                    }
+                    SpeechRecognizer.ERROR_NETWORK,
+                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT,
+                    SpeechRecognizer.ERROR_SERVER -> {
+                        reconnectAttempt = (reconnectAttempt + 1).coerceAtMost(4)
+                        val backoff = (700L * reconnectAttempt).coerceAtMost(3500L)
+                        updateState {
+                            it.copy(
+                                reconnecting = true,
+                                statusMessage = "নেটওয়ার্ক পুনঃসংযোগ চেষ্টা করছি..."
+                            )
+                        }
+                        scheduleVoiceLoop(backoff)
+                    }
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY,
+                    SpeechRecognizer.ERROR_AUDIO -> {
+                        reconnectAttempt = (reconnectAttempt + 1).coerceAtMost(3)
+                        scheduleVoiceLoop(900L * reconnectAttempt)
+                    }
+                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
+                        unmuteStreamsIfHeld()
+                        stopAllAndShutdownService()
+                    }
+                    else -> {
+                        scheduleVoiceLoop(550L)
+                    }
                 }
             }
 
             override fun onPartialResults(partialResults: Bundle?) {
-                if (isCommandMode) return
+                if (sessionToken != sessionGeneration.get()) return
                 val heard = partialResults
                     ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     ?.firstOrNull()
+                    ?.trim()
                     .orEmpty()
-                if (heard.isNotBlank() && matchesWakeWord(heard, repository.settings.value.customWakeWord)) {
+                if (heard.isBlank()) return
+
+                if (isCommandMode) {
+                    updateState { it.copy(lastHeardText = heard) }
+                } else if (matchesWakeWord(heard, repository.settings.value.customWakeWord)) {
                     val inlineCommand = extractAfterWakeWord(heard, repository.settings.value.customWakeWord)
                     if (inlineCommand.length >= 4) {
-                        // Wait slightly for final results unless user paused
                         return
                     }
-                    destroyRecognizer()
+                    destroyRecognizerSilently()
                     onWakeWordTriggered("")
                 }
             }
 
             override fun onResults(results: Bundle?) {
+                if (sessionToken != sessionGeneration.get()) return
+                reconnectAttempt = 0
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
                 val best = matches.firstOrNull().orEmpty().trim()
+                val currentSettings = repository.settings.value
+
                 if (best.isBlank()) {
-                    listeningMode = BackgroundAssistantPhase.LISTENING_WAKE
-                    scheduleWakeLoop(400L)
+                    if (currentSettings.continuousVoiceMode) {
+                        scheduleVoiceLoop(260L)
+                    } else {
+                        listeningMode = BackgroundAssistantPhase.LISTENING_WAKE
+                        scheduleVoiceLoop(350L)
+                    }
                     return
                 }
 
                 if (isCommandMode) {
-                    processUserVoiceQuery(best)
+                    val wakePhrase = currentSettings.customWakeWord
+                    val cleanedQuery = if (matchesWakeWord(best, wakePhrase)) {
+                        extractAfterWakeWord(best, wakePhrase).ifBlank { best }
+                    } else {
+                        best
+                    }
+                    processUserVoiceQuery(cleanedQuery)
                 } else {
-                    val wakePhrase = repository.settings.value.customWakeWord
+                    val wakePhrase = currentSettings.customWakeWord
                     val matched = matches.firstOrNull { matchesWakeWord(it, wakePhrase) }
                     if (matched != null) {
                         val inlineCommand = extractAfterWakeWord(matched, wakePhrase)
                         onWakeWordTriggered(inlineCommand)
                     } else {
-                        scheduleWakeLoop(350L)
+                        scheduleVoiceLoop(300L)
                     }
                 }
             }
@@ -434,12 +734,15 @@ class SaraWakeService : Service() {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, !isCommandMode)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, if (isCommandMode) 1800L else 1200L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, if (isCommandMode) 3000L else 1800L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, if (isCommandMode) 2500L else 1500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 3500L)
         }
         runCatching { recognizer.startListening(intent) }.onFailure {
-            scheduleWakeLoop(1500L)
+            unmuteStreamsIfHeld()
+            scheduleVoiceLoop(1200L)
         }
     }
 
@@ -458,6 +761,7 @@ class SaraWakeService : Service() {
         } else {
             "Yes, I'm listening!"
         }
+        unmuteStreamsIfHeld()
         updateState {
             it.copy(
                 phase = BackgroundAssistantPhase.SPEAKING,
@@ -480,6 +784,10 @@ class SaraWakeService : Service() {
     }
 
     private fun processUserVoiceQuery(userQuery: String) {
+        cancelPendingVoiceLoop()
+        destroyRecognizerSilently()
+        unmuteStreamsIfHeld()
+
         listeningMode = BackgroundAssistantPhase.THINKING
         updateState {
             it.copy(
@@ -510,10 +818,17 @@ class SaraWakeService : Service() {
                 senderVoicePersona = currentSettings.femaleVoicePersona.voiceId
             )
 
+            if (!_assistantState.value.serviceRunning || _assistantState.value.isPaused) {
+                return@launch
+            }
+
+            unmuteStreamsIfHeld()
+            listeningMode = BackgroundAssistantPhase.SPEAKING
             updateState {
                 it.copy(
                     phase = BackgroundAssistantPhase.SPEAKING,
                     lastResponseText = reply.text,
+                    reconnecting = false,
                     statusMessage = "সারা উত্তর দিচ্ছে..."
                 )
             }
@@ -521,11 +836,17 @@ class SaraWakeService : Service() {
 
             voiceEngine.speakIfEnabled(
                 text = reply.text,
-                settings = currentSettings,
+                settings = repository.settings.value,
                 onPlaybackFinished = {
-                    listeningMode = BackgroundAssistantPhase.LISTENING_WAKE
+                    val latest = repository.settings.value
                     if (_assistantState.value.serviceRunning && !_assistantState.value.isPaused) {
-                        scheduleWakeLoop(550L)
+                        listeningMode = if (latest.continuousVoiceMode) {
+                            BackgroundAssistantPhase.LISTENING_COMMAND
+                        } else {
+                            BackgroundAssistantPhase.LISTENING_WAKE
+                        }
+                        // Slight echo-clearance pause then auto-resume Continuous Voice Mode
+                        scheduleVoiceLoop(260L)
                     }
                 }
             )
@@ -568,18 +889,29 @@ class SaraWakeService : Service() {
         return ""
     }
 
-    private fun destroyRecognizer() {
-        runCatching {
-            speechRecognizer?.cancel()
-            speechRecognizer?.destroy()
+    private fun destroyRecognizerSilently(incrementGeneration: Boolean = true) {
+        if (incrementGeneration) {
+            sessionGeneration.incrementAndGet()
         }
+        val active = speechRecognizer
         speechRecognizer = null
+        if (active != null) {
+            muteRecognizerChimeBriefly(includeMediaStream = false)
+            runCatching {
+                active.cancel()
+                active.destroy()
+            }
+        }
     }
 
     private fun stopAllAndShutdownService() {
-        destroyRecognizer()
+        cancelPendingVoiceLoop()
+        destroyRecognizerSilently()
+        unmuteStreamsIfHeld()
         voiceEngine.stopPlayback()
+        releaseVoiceWakeLock()
         overlayManager.hideAll()
+        listeningMode = BackgroundAssistantPhase.IDLE
         _isRunning.value = false
         repository.updateSettings {
             it.copy(
@@ -592,9 +924,11 @@ class SaraWakeService : Service() {
             BackgroundAssistantState(
                 serviceRunning = false,
                 isPaused = false,
+                continuousModeActive = false,
                 phase = BackgroundAssistantPhase.IDLE,
-                statusMessage = "সার্ভিস বন্ধ আছে",
-                overlayVisible = false
+                statusMessage = "ভয়েস অ্যাসিস্ট্যান্ট বন্ধ আছে",
+                overlayVisible = false,
+                reconnecting = false
             )
         }
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -642,10 +976,13 @@ class SaraWakeService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val title = "${settings.assistantName.ifBlank { "SARA" }} ব্যাকগ্রাউন্ড অ্যাসিস্ট্যান্ট"
+        val title = "${settings.assistantName.ifBlank { "SARA" }} ভয়েস অ্যাসিস্ট্যান্ট"
         val body = when {
             state.isPaused -> "বিরতিতে আছে · Resume ট্যাপ করলে আবার শুনবে"
+            state.reconnecting -> "নেটওয়ার্ক পুনঃসংযোগের অপেক্ষায়..."
             state.phase == BackgroundAssistantPhase.SPEAKING -> "কথা বলছি · ${state.lastResponseText.take(42)}"
+            state.phase == BackgroundAssistantPhase.LISTENING_COMMAND && settings.continuousVoiceMode ->
+                "নিরবচ্ছিন্ন শুনছি · যেকোনো সময় কথা বলুন"
             state.phase == BackgroundAssistantPhase.LISTENING_COMMAND -> "আপনার কথা শুনছি..."
             else -> "\"${settings.customWakeWord}\" শোনার জন্য সক্রিয়"
         }
@@ -672,10 +1009,10 @@ class SaraWakeService : Service() {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "SARA Background Assistant",
+                "SARA Continuous Voice Assistant",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Active while SARA listens outside the app & powers floating control"
+                description = "Active while SARA listens continuously in the background"
                 setShowBadge(false)
             }
             manager.createNotificationChannel(channel)
@@ -691,8 +1028,12 @@ class SaraWakeService : Service() {
     }
 
     override fun onDestroy() {
+        cancelPendingVoiceLoop()
         runCatching { unregisterReceiver(screenReceiver) }
-        destroyRecognizer()
+        runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
+        destroyRecognizerSilently()
+        unmuteStreamsIfHeld()
+        releaseVoiceWakeLock()
         if (::overlayManager.isInitialized) overlayManager.hideAll()
         if (::voiceEngine.isInitialized) voiceEngine.shutdown()
         serviceScope.cancel()
@@ -708,6 +1049,7 @@ class SaraWakeService : Service() {
         const val ACTION_STOP = "com.sara.assistant.action.STOP_WAKE"
         const val ACTION_PAUSE = "com.sara.assistant.action.PAUSE_WAKE"
         const val ACTION_RESUME = "com.sara.assistant.action.RESUME_WAKE"
+        const val ACTION_TOGGLE_CONTINUOUS = "com.sara.assistant.action.TOGGLE_CONTINUOUS"
         const val ACTION_TALK_NOW = "com.sara.assistant.action.TALK_NOW"
         const val ACTION_STOP_CONVERSATION = "com.sara.assistant.action.STOP_CONVERSATION"
         const val ACTION_REFRESH_OVERLAY = "com.sara.assistant.action.REFRESH_OVERLAY"
@@ -731,6 +1073,23 @@ class SaraWakeService : Service() {
                 action = ACTION_START
                 putExtra(EXTRA_WAKE_WORD, wakeWord)
                 putExtra(EXTRA_START_PAUSED, startPaused)
+            }
+            return runCatching {
+                ContextCompat.startForegroundService(context, intent)
+                true
+            }.getOrDefault(false)
+        }
+
+        fun toggleContinuousVoice(context: Context, wakeWord: String): Boolean {
+            val hasMic = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasMic) return false
+
+            val intent = Intent(context, SaraWakeService::class.java).apply {
+                action = ACTION_TOGGLE_CONTINUOUS
+                putExtra(EXTRA_WAKE_WORD, wakeWord)
             }
             return runCatching {
                 ContextCompat.startForegroundService(context, intent)

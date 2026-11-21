@@ -99,6 +99,14 @@ class SaraVoiceEngine(
     private var activeSpeechJob: Job? = null
     private var activeCompletionCallback: (() -> Unit)? = null
     private var activeFocusRequest: AudioFocusRequest? = null
+    private var pendingInitRequest: PendingNativeTtsRequest? = null
+
+    private data class PendingNativeTtsRequest(
+        val text: String,
+        val settings: SaraSettings,
+        val onComplete: (VoicePlaybackResult) -> Unit,
+        val onPlaybackFinished: (() -> Unit)?
+    )
 
     private val _status = MutableStateFlow(VoiceEngineStatus())
     val status: StateFlow<VoiceEngineStatus> = _status.asStateFlow()
@@ -117,6 +125,17 @@ class SaraVoiceEngine(
                 initialized = false,
                 unavailableMessage = "ডিভাইসের অফলাইন TTS ইঞ্জিন পাওয়া যায়নি; ক্লাউড নিউরাল ভয়েস ব্যবহার করুন।"
             )
+            pendingInitRequest?.let { pending ->
+                pendingInitRequest = null
+                pending.onComplete(
+                    VoicePlaybackResult(
+                        started = false,
+                        providerUsed = "Android TTS",
+                        message = "ডিভাইসের TTS ইঞ্জিন প্রস্তুত নয়।"
+                    )
+                )
+                pending.onPlaybackFinished?.invoke()
+            }
             return
         }
 
@@ -133,23 +152,26 @@ class SaraVoiceEngine(
             }
 
             override fun onDone(utteranceId: String?) {
-                // Only fire completion for the final queued segment
                 if (utteranceId?.endsWith("_last") == true) {
+                    scope.launch {
+                        _isSpeaking.value = false
+                        abandonAudioFocus()
+                        val cb = activeCompletionCallback
+                        activeCompletionCallback = null
+                        cb?.invoke()
+                    }
+                }
+            }
+
+            @Deprecated("Deprecated in Java")
+            override fun onError(utteranceId: String?) {
+                scope.launch {
                     _isSpeaking.value = false
                     abandonAudioFocus()
                     val cb = activeCompletionCallback
                     activeCompletionCallback = null
                     cb?.invoke()
                 }
-            }
-
-            @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) {
-                _isSpeaking.value = false
-                abandonAudioFocus()
-                val cb = activeCompletionCallback
-                activeCompletionCallback = null
-                cb?.invoke()
             }
         })
 
@@ -164,15 +186,15 @@ class SaraVoiceEngine(
         val bestMaleBengali = selectBestVoiceForLocale(bengaliVoices, VoiceGenderPreference.MALE)
 
         val anyFemale = bestFemaleBengali ?: allVoices.firstOrNull { isExplicitFemaleVoice(it) }
-        val neuralFemaleAvailable = bestFemaleBengali?.let { isHighQualityOrNetworkVoice(it) } == true
+        val neuralFemaleAvailable = bestFemaleBengali?.let { isHighQualityOrNetworkVoice(it) && isExplicitFemaleVoice(it) } == true
 
         val qualityNote = when {
             bestFemaleBengali == null && bengaliVoices.isEmpty() ->
                 "এই ডিভাইসে অফলাইন বাংলা ভয়েস প্যাক পাওয়া যায়নি। সবচেয়ে সুন্দর ও মানবিক বাংলা নারী কণ্ঠের জন্য Cloud Neural Female (Gemini TTS) সক্রিয় রাখুন।"
             !neuralFemaleAvailable ->
-                "অত্যন্ত মিষ্টি ও বাস্তব মানুষের মতো বাংলা নারী কণ্ঠের জন্য Cloud Neural Female (Kore / Zephyr / Aoede / Leda) ব্যবহার করা উত্তম।"
+                "৬টি নারী কণ্ঠই ফিমেল টিউনে সক্রিয় আছে; আরও বাস্তব মানুষের মতো বাংলা কণ্ঠের জন্য Cloud Neural Female ব্যবহার করতে পারেন।"
             else ->
-                "ডিভাইসে উচ্চমানের বাংলা নারী নেটওয়ার্ক ভয়েস (${bestFemaleBengali?.name}) পাওয়া গেছে; ক্লাউড নিউরাল কণ্ঠ আরো বেশি মানবিক ও স্বাভাবিক।"
+                "ডিভাইসে বাংলা নারী ভয়েস (${bestFemaleBengali?.name}) পাওয়া গেছে; ৬টি নারী কণ্ঠই ব্যবহারযোগ্য।"
         }
 
         _status.value = VoiceEngineStatus(
@@ -186,6 +208,17 @@ class SaraVoiceEngine(
             bengaliVoiceInventoryCount = bengaliVoices.size,
             honestQualityNote = qualityNote
         )
+
+        pendingInitRequest?.let { pending ->
+            pendingInitRequest = null
+            scope.launch {
+                val res = speakWithNativeTts(pending.text, pending.settings, pending.onPlaybackFinished)
+                if (!res.started) {
+                    pending.onPlaybackFinished?.invoke()
+                }
+                pending.onComplete(res)
+            }
+        }
     }
 
     fun speakTest(
@@ -361,6 +394,16 @@ class SaraVoiceEngine(
             return
         }
 
+        if (!_status.value.initialized) {
+            pendingInitRequest = PendingNativeTtsRequest(
+                text = formattedText,
+                settings = settings,
+                onComplete = onComplete,
+                onPlaybackFinished = onPlaybackFinished
+            )
+            return
+        }
+
         val nativeResult = speakWithNativeTts(formattedText, settings, onPlaybackFinished)
         if (!nativeResult.started) {
             onPlaybackFinished?.invoke()
@@ -368,15 +411,7 @@ class SaraVoiceEngine(
         if (settings.voiceProvider == VoiceProviderMode.CLOUD_NEURAL_FEMALE &&
             endpointUrl.isEmpty() && directApiKey == null
         ) {
-            onComplete(
-                nativeResult.copy(
-                    message = if (nativeResult.started) {
-                        "${nativeResult.message} (সর্বোচ্চ মানবিক নিউরাল নারী কণ্ঠের জন্য এআই ব্রেইন-এ Gemini API Key বা Cloud TTS URL যোগ করুন)"
-                    } else {
-                        nativeResult.message
-                    }
-                )
-            )
+            onComplete(nativeResult)
         } else {
             onComplete(nativeResult)
         }
@@ -757,12 +792,12 @@ class SaraVoiceEngine(
         val bnVoices = allVoices.filter { it.locale.language.equals("bn", ignoreCase = true) }
         val enVoices = allVoices.filter { it.locale.language.equals("en", ignoreCase = true) }
 
-        val bestBnVoice = selectBestVoiceForLocale(bnVoices, settings.voiceGender)
-        val bestEnVoice = selectBestVoiceForLocale(enVoices, settings.voiceGender)
+        val bestBnVoice = selectBestVoiceForLocale(bnVoices, settings.voiceGender, settings.femaleVoicePersona)
+        val bestEnVoice = selectBestVoiceForLocale(enVoices, settings.voiceGender, settings.femaleVoicePersona)
 
-        val bnFallbackLocale = when {
-            engine.isLanguageAvailable(Locale("bn", "BD")) >= TextToSpeech.LANG_AVAILABLE -> Locale("bn", "BD")
+        val bnFallbackLocale = bestBnVoice?.locale ?: when {
             engine.isLanguageAvailable(Locale("bn", "IN")) >= TextToSpeech.LANG_AVAILABLE -> Locale("bn", "IN")
+            engine.isLanguageAvailable(Locale("bn", "BD")) >= TextToSpeech.LANG_AVAILABLE -> Locale("bn", "BD")
             else -> Locale.US
         }
 
@@ -772,19 +807,34 @@ class SaraVoiceEngine(
         }
 
         val speedMod = when (settings.femaleVoicePersona) {
-            FemaleVoicePersona.LEDA, FemaleVoicePersona.SARA_VELVET -> -0.04f
-            FemaleVoicePersona.AOEDE, FemaleVoicePersona.SARA_SWEET -> +0.02f
-            else -> 0f
+            FemaleVoicePersona.LEDA -> -0.06f
+            FemaleVoicePersona.SARA_VELVET -> -0.08f
+            FemaleVoicePersona.ZEPHYR -> -0.03f
+            FemaleVoicePersona.AOEDE -> +0.04f
+            FemaleVoicePersona.SARA_SWEET -> +0.02f
+            FemaleVoicePersona.KORE -> 0f
         }
         engine.setSpeechRate((settings.speechSpeed + speedMod).coerceIn(0.65f, 1.75f))
 
-        // Preserve neural naturalness at 1.0f unless user explicitly shifts pitch
         val primaryChosen = if (settings.voiceLanguage == VoiceLanguageOption.BENGALI) bestBnVoice else bestEnVoice
-        val isPrimaryNeural = primaryChosen?.let { isHighQualityOrNetworkVoice(it) } == true
-        val effectivePitch = if (isPrimaryNeural && abs(settings.speechPitch - 1.0f) <= 0.03f) {
-            1.0f
-        } else {
-            settings.speechPitch.coerceIn(0.85f, 1.25f)
+        val isVerifiedFemaleVoice = primaryChosen?.let { isExplicitFemaleVoice(it) } == true
+        val isConfirmedMaleFallback = primaryChosen?.let { isExplicitMaleVoice(it) } == true
+
+        // Distinct feminine tonal curves per persona so all 6 female voice buttons sound female & unique
+        val personaPitchOffset = when (settings.femaleVoicePersona) {
+            FemaleVoicePersona.KORE -> 0.06f
+            FemaleVoicePersona.ZEPHYR -> 0.10f
+            FemaleVoicePersona.AOEDE -> 0.14f
+            FemaleVoicePersona.LEDA -> 0.03f
+            FemaleVoicePersona.SARA_SWEET -> 0.17f
+            FemaleVoicePersona.SARA_VELVET -> 0.01f
+        }
+
+        val effectivePitch = when {
+            settings.voiceGender == VoiceGenderPreference.MALE -> settings.speechPitch.coerceIn(0.75f, 1.0f)
+            isVerifiedFemaleVoice -> (settings.speechPitch + personaPitchOffset).coerceIn(0.95f, 1.32f)
+            isConfirmedMaleFallback -> (settings.speechPitch + 0.24f + personaPitchOffset * 0.7f).coerceIn(1.18f, 1.45f)
+            else -> (settings.speechPitch + 0.15f + personaPitchOffset * 0.8f).coerceIn(1.08f, 1.38f)
         }
         engine.setPitch(effectivePitch)
 
@@ -816,11 +866,12 @@ class SaraVoiceEngine(
             }
         }
 
-        val voiceLabel = primaryChosen?.name ?: bnFallbackLocale.displayName
+        val voiceLabel = settings.femaleVoicePersona.voiceId
+        val nativeId = primaryChosen?.name ?: bnFallbackLocale.displayName
         val notice = when {
             !startedAny -> "Android TTS প্লেব্যাক ব্যর্থ হয়েছে।"
-            isPrimaryNeural -> "উচ্চমানের বাংলা নারী নেটওয়ার্ক ভয়েস ($voiceLabel) চালু হয়েছে।"
-            else -> "ডিভাইস অফলাইন নারী TTS ($voiceLabel) চালু হয়েছে।"
+            isVerifiedFemaleVoice -> "বাংলা নারী কণ্ঠ ($voiceLabel · $nativeId) চালু হয়েছে।"
+            else -> "নারী কণ্ঠ প্রোফাইল ($voiceLabel) সক্রিয় হয়েছে।"
         }
 
         return VoicePlaybackResult(
@@ -831,6 +882,7 @@ class SaraVoiceEngine(
     }
 
     fun stopPlayback() {
+        pendingInitRequest = null
         activeCompletionCallback = null
         activeSpeechJob?.cancel()
         activeSpeechJob = null
@@ -1055,32 +1107,49 @@ class SaraVoiceEngine(
 
     private fun selectBestVoiceForLocale(
         voices: List<Voice>,
-        preference: VoiceGenderPreference
+        preference: VoiceGenderPreference,
+        persona: FemaleVoicePersona = FemaleVoicePersona.KORE
     ): Voice? {
         if (voices.isEmpty()) return null
 
         val genderFiltered = when (preference) {
             VoiceGenderPreference.FEMALE -> {
                 val explicit = voices.filter { isExplicitFemaleVoice(it) }
-                if (explicit.isNotEmpty()) explicit else voices.filterNot { isExplicitMaleVoice(it) }
+                if (explicit.isNotEmpty()) {
+                    explicit
+                } else {
+                    voices.filterNot { isExplicitMaleVoice(it) }
+                }
             }
             VoiceGenderPreference.MALE -> voices.filter { isExplicitMaleVoice(it) }
             VoiceGenderPreference.SYSTEM_DEFAULT -> voices
         }
 
         val pool = if (genderFiltered.isNotEmpty()) genderFiltered else voices
-        return pool.maxByOrNull { voice ->
+        val ranked = pool.sortedByDescending { voice ->
             var score = 0
-            if (voice.locale.country.equals("BD", ignoreCase = true)) score += 45
+            if (preference == VoiceGenderPreference.FEMALE) {
+                if (isExplicitFemaleVoice(voice)) score += 240
+                if (isExplicitMaleVoice(voice)) score -= 500
+            } else if (preference == VoiceGenderPreference.MALE) {
+                if (isExplicitMaleVoice(voice)) score += 240
+            }
+            if (voice.locale.country.equals("BD", ignoreCase = true)) score += 30
             else if (voice.locale.country.equals("IN", ignoreCase = true)) score += 25
             else if (voice.locale.country.equals("US", ignoreCase = true)) score += 20
-            if (voice.isNetworkConnectionRequired || isHighQualityOrNetworkVoice(voice)) score += 60
+            if (voice.isNetworkConnectionRequired || isHighQualityOrNetworkVoice(voice)) score += 55
             if (voice.quality >= Voice.QUALITY_VERY_HIGH) score += 40
             else if (voice.quality >= Voice.QUALITY_HIGH) score += 25
-            if (isExplicitFemaleVoice(voice) && preference == VoiceGenderPreference.FEMALE) score += 35
-            if (isExplicitMaleVoice(voice) && preference == VoiceGenderPreference.FEMALE) score -= 90
             score
         }
+
+        if (preference == VoiceGenderPreference.FEMALE) {
+            val distinctFemalePool = ranked.filter { isExplicitFemaleVoice(it) }
+            if (distinctFemalePool.size > 1) {
+                return distinctFemalePool[persona.ordinal % distinctFemalePool.size]
+            }
+        }
+        return ranked.firstOrNull()
     }
 
     private fun isHighQualityOrNetworkVoice(voice: Voice): Boolean {
@@ -1095,23 +1164,39 @@ class SaraVoiceEngine(
     private fun isExplicitMaleVoice(voice: Voice): Boolean {
         val nameLower = voice.name.lowercase(Locale.ROOT)
         val featureText = voice.features?.joinToString(",")?.lowercase(Locale.ROOT).orEmpty()
-        return nameLower.contains("male") ||
+        return Regex("(^|[-_#\\s])male($|[-_#\\s])").containsMatchIn(nameLower) ||
             nameLower.contains("-bnm-") ||
             nameLower.contains("-bnc-") ||
+            nameLower.contains("-bnd-") ||
+            nameLower.contains("-ban-") ||
             nameLower.contains("-bab-") ||
+            nameLower.contains("-bac-") ||
+            nameLower.contains("-bad-") ||
+            nameLower.contains("-bar-") ||
             nameLower.contains("-m-") ||
-            featureText.contains("male")
+            nameLower.contains("bashkar") ||
+            nameLower.contains("pradeep") ||
+            nameLower.contains("tanmoy") ||
+            Regex("(^|[,\\s=])male($|[,\\s])").containsMatchIn(featureText)
     }
 
     private fun isExplicitFemaleVoice(voice: Voice): Boolean {
         val nameLower = voice.name.lowercase(Locale.ROOT)
         val featureText = voice.features?.joinToString(",")?.lowercase(Locale.ROOT).orEmpty()
+        if (isExplicitMaleVoice(voice)) return false
         return nameLower.contains("female") ||
             nameLower.contains("-bnf-") ||
-            nameLower.contains("-bnd-") ||
+            nameLower.contains("-bne-") ||
             nameLower.contains("-bna-") ||
-            nameLower.contains("-ban-") ||
+            nameLower.contains("-baf-") ||
+            nameLower.contains("-baa-") ||
+            nameLower.contains("-sfg-") ||
+            nameLower.contains("-tpf-") ||
             nameLower.contains("-f-") ||
+            nameLower.contains("tanishaa") ||
+            nameLower.contains("nabanita") ||
+            nameLower.contains("kalpana") ||
+            nameLower.contains("heera") ||
             featureText.contains("female")
     }
 

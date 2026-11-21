@@ -113,8 +113,10 @@ fun HomeScreen(
     backgroundState: BackgroundAssistantState,
     onOpenInbox: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenFemaleVoices: () -> Unit,
     onOpenBackgroundSettings: () -> Unit,
     onStartWakeService: () -> Unit,
+    onToggleContinuousVoice: () -> Unit,
     onTogglePauseService: () -> Unit,
     onStopWakeService: () -> Unit,
     onTalkOutside: () -> Unit,
@@ -131,7 +133,6 @@ fun HomeScreen(
             if (settings.voiceLanguage == VoiceLanguageOption.BENGALI) AppLanguage.BENGALI else AppLanguage.ENGLISH
         )
     }
-    var orbState by remember { mutableStateOf(SaraOrbState.IDLE) }
     var draftMessage by remember { mutableStateOf("") }
     var isThinking by remember { mutableStateOf(false) }
     var feedbackNote by remember { mutableStateOf<String?>(null) }
@@ -139,15 +140,20 @@ fun HomeScreen(
 
     val assistantName = settings.assistantName.ifBlank { "SARA" }
     val timeGreeting = remember(language) { resolveTimeGreeting(language) }
+    val voiceAssistantOn = backgroundState.serviceRunning && !backgroundState.isPaused
+    val activeSpeaking = isSpeaking || backgroundState.phase == BackgroundAssistantPhase.SPEAKING
+    val activeThinking = isThinking || backgroundState.phase == BackgroundAssistantPhase.THINKING
     val effectiveOrbState = when {
-        isSpeaking -> SaraOrbState.SPEAKING
-        isThinking -> SaraOrbState.ACTIVE_GREETING
-        backgroundState.phase == BackgroundAssistantPhase.LISTENING_COMMAND -> SaraOrbState.LISTENING
-        else -> orbState
+        activeSpeaking -> SaraOrbState.SPEAKING
+        activeThinking -> SaraOrbState.ACTIVE_GREETING
+        voiceAssistantOn -> SaraOrbState.LISTENING
+        else -> SaraOrbState.IDLE
     }
 
-    val latestAssistantReply = remember(conversationHistory, feedbackNote) {
-        feedbackNote ?: conversationHistory.firstOrNull { it.isAssistant }?.message
+    val latestAssistantReply = remember(conversationHistory, feedbackNote, backgroundState.lastResponseText) {
+        feedbackNote
+            ?: backgroundState.lastResponseText.takeIf { it.isNotBlank() }
+            ?: conversationHistory.firstOrNull { it.isAssistant }?.message
     }
 
     val sendPrompt: () -> Unit = {
@@ -158,7 +164,6 @@ fun HomeScreen(
             scope.launch {
                 val replyText = onSubmitMessage(captured)
                 isThinking = false
-                orbState = SaraOrbState.ACTIVE_GREETING
                 feedbackNote = replyText
             }
         } else if (captured.isBlank()) {
@@ -173,20 +178,8 @@ fun HomeScreen(
     val triggerOrbTalk: () -> Unit = {
         if (isSpeaking) {
             onStopSpeaking()
-            orbState = SaraOrbState.IDLE
         } else {
-            orbState = when (orbState) {
-                SaraOrbState.IDLE -> SaraOrbState.ACTIVE_GREETING
-                SaraOrbState.ACTIVE_GREETING -> SaraOrbState.LISTENING
-                SaraOrbState.LISTENING, SaraOrbState.SPEAKING -> SaraOrbState.IDLE
-            }
-            val spoken = if (language == AppLanguage.BENGALI) {
-                "আসসালামু আলাইকুম! আমি $assistantName। বলুন, আজ কীভাবে সাহায্য করতে পারি?"
-            } else {
-                "Hello! I am $assistantName. How can I assist you today?"
-            }
-            feedbackNote = spoken
-            onOrbSpeak(spoken)
+            onToggleContinuousVoice()
         }
     }
 
@@ -288,7 +281,7 @@ fun HomeScreen(
                     onTap = triggerOrbTalk
                 )
 
-                if (isSpeaking || isThinking || effectiveOrbState != SaraOrbState.IDLE) {
+                if (activeSpeaking || activeThinking || effectiveOrbState != SaraOrbState.IDLE) {
                     VoiceWaveform(
                         state = effectiveOrbState,
                         animationsEnabled = settings.animationsEnabled
@@ -302,19 +295,24 @@ fun HomeScreen(
                 ) {
                     Text(
                         text = when {
-                            isThinking -> if (language == AppLanguage.BENGALI) "দ্রুত উত্তর তৈরি হচ্ছে..." else "Generating reply..."
+                            backgroundState.reconnecting ->
+                                if (language == AppLanguage.BENGALI) "নেটওয়ার্ক পুনঃসংযোগ হচ্ছে..." else "Reconnecting..."
+                            activeThinking ->
+                                if (language == AppLanguage.BENGALI) "দ্রুত উত্তর তৈরি হচ্ছে..." else "Generating reply..."
                             effectiveOrbState == SaraOrbState.SPEAKING ->
                                 if (language == AppLanguage.BENGALI) "${settings.femaleVoicePersona.voiceId} নারী কণ্ঠে বলছি..." else "Speaking (${settings.femaleVoicePersona.voiceId})..."
-                            effectiveOrbState == SaraOrbState.LISTENING ->
-                                if (language == AppLanguage.BENGALI) "শুনছি..." else "Listening..."
-                            else -> if (language == AppLanguage.BENGALI) "ট্যাপ করে কথা বলুন" else "Tap the orb to speak"
+                            voiceAssistantOn ->
+                                if (language == AppLanguage.BENGALI) "নিরবচ্ছিন্ন ভয়েস চালু (ON) — কথা বলুন..." else "Continuous Voice ON — Listening..."
+                            backgroundState.serviceRunning && backgroundState.isPaused ->
+                                if (language == AppLanguage.BENGALI) "ভয়েস বিরতিতে · ট্যাপ করে চালু করুন" else "Voice Paused — Tap to resume"
+                            else -> if (language == AppLanguage.BENGALI) "ট্যাপ করে ভয়েস চালু করুন (OFF)" else "Tap orb to turn Voice ON"
                         },
                         style = MaterialTheme.typography.labelMedium.copy(
-                            color = colors.accentPrimary,
+                            color = if (voiceAssistantOn || activeSpeaking) colors.accentPrimary else colors.textSecondary,
                             fontWeight = FontWeight.SemiBold
                         )
                     )
-                    if (isSpeaking) {
+                    if (activeSpeaking) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Box(
                             modifier = Modifier
@@ -326,6 +324,24 @@ fun HomeScreen(
                         ) {
                             Text(
                                 text = if (language == AppLanguage.BENGALI) "থামান" else "Stop",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = colors.accentPrimary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                    } else if (voiceAssistantOn) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(colors.accentPrimary.copy(alpha = 0.16f))
+                                .border(1.dp, colors.accentPrimary.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                .clickable(onClick = onStopWakeService)
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = if (language == AppLanguage.BENGALI) "OFF" else "OFF",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = colors.accentPrimary,
                                     fontWeight = FontWeight.Bold
@@ -489,21 +505,17 @@ fun HomeScreen(
                     AuraBentoCard(
                         icon = Icons.Rounded.RecordVoiceOver,
                         title = if (language == AppLanguage.BENGALI) "ভয়েস মোড" else "Voice Mode",
-                        subtitle = if (language == AppLanguage.BENGALI) {
-                            "${settings.femaleVoicePersona.voiceId} · কথা বলুন"
+                        subtitle = if (voiceAssistantOn) {
+                            if (language == AppLanguage.BENGALI) "ON · নিরবচ্ছিন্ন শুনছি" else "ON · Continuous Active"
                         } else {
-                            "Talk to $assistantName"
-                        },
-                        highlighted = isSpeaking,
-                        onClick = {
-                            val sample = if (language == AppLanguage.BENGALI) {
-                                settings.femaleVoicePersona.previewSentenceBn.replace("সারা", assistantName)
+                            if (language == AppLanguage.BENGALI) {
+                                "${settings.femaleVoicePersona.voiceId} · চালু করুন"
                             } else {
-                                settings.femaleVoicePersona.previewSentenceEn.replace("SARA", assistantName)
+                                "OFF · Tap to turn ON"
                             }
-                            feedbackNote = sample
-                            onOrbSpeak(sample)
                         },
+                        highlighted = voiceAssistantOn || activeSpeaking,
+                        onClick = onToggleContinuousVoice,
                         modifier = Modifier.weight(1f)
                     )
                     AuraBentoCard(
@@ -587,7 +599,7 @@ fun HomeScreen(
                         icon = Icons.Rounded.AutoAwesome,
                         title = if (language == AppLanguage.BENGALI) "নারী কণ্ঠ (৬টি)" else "6 Female Voices",
                         subtitle = settings.femaleVoicePersona.voiceId,
-                        onClick = onOpenSettings,
+                        onClick = onOpenFemaleVoices,
                         modifier = Modifier.weight(1f)
                     )
                 }
